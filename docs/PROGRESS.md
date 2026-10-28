@@ -126,17 +126,24 @@ Kodi/serving notes: Kodi plays the original 100 s file from the PC's range serve
 
 **Assumed, not verified:** HDR10 and Dolby Vision land on the same rows as SDR (see Phase 1); the 316 ms add-on lead carries over to other files, refresh rates and Kodi settings (one file, one capture).
 
-## Phase 4 status (analyzer, 2026-10-28): slice 1 of 5 done
+## Phase 4 status (analyzer, 2026-10-28): slices 1 and 2 of 5 done
 
 Environment: project `.venv` (Python 3.12.10, user-approved) with fastapi 0.162.0, uvicorn 0.54.0, pydantic 2.14.1, pytest 9.2.0, ruff 0.17.3, httpx 0.28.1 (pinned in `analyzer/requirements*.txt`).
 
 | Slice | Content | State |
 |---|---|---|
 | 1 | `analyzer/`: ffprobe layer (video stream chosen by disposition, cover art ignored, display ratio from SAR, VFR and interlace flags, HDR classification incl. Dolby Vision profile, HDR10+ from frame side data), skip rules (ISO, non-video, 3D tags, MVC, extras and trailers, audio-only, broken), quick hash, timeline schema v1 with validation, CLI `python -m cih_analyzer <file>` | **Done.** 62 tests pass, ruff clean. Verified on generated videos (SDR, HDR10, HLG, cover art, non-square pixels, non-zero start time, interlaced, audio-only, corrupt, Unicode name) and on the real sample clips |
-| 2 | Coarse pass (keyframe `cropdetect` + `signalstats`), sample gating, aspect snapping, segmentation with hysteresis | Not started |
+| 2 | Coarse pass (keyframe `cropdetect` + `signalstats`), sample gating, aspect snapping, segmentation with hysteresis | **Done.** 106 tests pass, ruff clean. `coarse.py` (keyframe sampling, parser, bit depth from the pixel format, default limit 0.094) and `segmentation.py` (dark and tiny-crop gating, snapping to the nine standard ratios within 1.5%, runs, ramp candidates, flicker merging by real run duration, `needs_verification` flags). Synthetic T2 videos with known ratios cover variable ratios, fade to black, subtitles in the matte, credits on black, studio logo, 4:3 pillarbox, non-square pixels, a ramp, PQ 10-bit and a non-zero start time. See the findings below |
 | 3 | Boundary refinement, cut or ramp classification, ramp fitting | Not started |
 | 4 | Scheduler, SQLite, Plex mapping, path mapping, HTTP API, status page | Not started |
 | 5 | Dockerfile, GitHub Actions, Unraid template, install text | Not started |
+
+Findings in slice 2 (measured; the first two corrected my own earlier statements):
+- **Threshold:** `cropdetect`'s `limit` must be above the black level. Limited-range black is about 0.063 in both 8 and 10 bits; below that the whole frame counts as picture. My earlier "stable from 0.02 to 0.1" on the *Carrie* clip was vacuous below 0.063 (corrected in `docs/AUDIT_1.md`). Calibrated on noisy letterboxed SDR and PQ fixtures: the matte is found from 0.063 up; default 0.094.
+- **Luma scale:** `signalstats`' `YBITDEPTH` is the estimated bits needed by the values (7 for ordinary 8-bit video), not the format's depth; using it doubled the brightness of 8-bit sources. The bit depth now comes from the pixel format.
+- **Real clips (keyframe pass, about 5 to 23 s of scan per 90 to 180 s clip):** *Carrie* S01E06 is one 2.00:1 segment (no mattes); the 2.00 zoom is 0.8510. South Park (1080p), the DVD-style clip with non-square pixels (16:9 after the pixel aspect ratio) and the 3840x1600 clip each give one segment at 1.78, 1.78 and 2.40. *Below* S01E01 is a 2.20 picture in a 16:9 frame; with the first rules, dark scenes whose black edges look like mattes produced a string of false segments (1.73, 1.81, 2.15 ...). Two rule changes fixed most of them: a run's duration is its own sample span plus one sampling interval (not the distance to the next run), and a non-standard ratio must last 12 s. One 3-second "1.90" blip remains in *Below* and is marked `needs_verification`; whether it is a real insert or a dark scene cannot be decided from keyframes alone. *Scott Pilgrim* gives 1.78 (10 s), 1.85, and a low-agreement 1.90 tail that is probably credits.
+- **Crystal Lake S01E07 ("4:3" per the user's description)** measures a constant **1.667 (5:3)**: the picture area is 3600x2160 with 120 px bars at each side on all 88 usable samples. It is a non-standard ratio in the preset list, so it is reported raw. Either the episode really is 5:3, or the user's description was approximate.
+- **Open for slice 3:** refinement must re-sample `needs_verification` segments densely (a false crop from a dark scene is contradicted within seconds, a real matte is not), narrow each boundary window to the exact frame, and classify cuts and ramps.
 
 Findings in slice 1: the original *Carrie* file reads as `DV-P8` with HDR10+ and HDR10 extras (stream 0; the cover-art stream is ignored). A stream-copied clip loses the stream-level Dolby Vision record, so the analyzer reports `HDR10+` plus a `DV-RPU` extra from the frames; real files carry the record. Synthetic HDR fixtures need `setparams` as well as encoder flags, or the colour tags are lost.
 

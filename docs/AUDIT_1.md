@@ -183,7 +183,7 @@ No requirement is missing from the design, and none of the ten lessons is repeat
 
 **The *Carrie* sample** (private path kept in `docs/LOCAL_FACTS.md`; a 90 s stream-copy clip is in the gitignored `samples/`): HEVC Main 10, **3840x1920 (2.00:1) native container**, 24 fps, PQ, BT.2020, **HDR10+ (SMPTE 2094-40) and Dolby Vision profile 8.1 (single layer, HDR10-compatible)**, MP4, 59 minutes, `start_time` 0. Checked read-only over SMB:
 
-- **Crop detection works on it.** On the clip's keyframes, `cropdetect` at limits 0.02, 0.05 and 0.1 gives `crop=3840:1920:0:0` on all 44 samples, so no baked-in mattes. At limit 0.2 it produces false crops on dark frames (for example 2884x1392), which is concrete evidence for tuning the limit per transfer (spec Phase 4 step 2). Brightness of the keyframes (10-bit YAVG, black = 64) ranged 205 to 375.
+- **Crop detection runs on it and finds no mattes.** On the clip's keyframes, `cropdetect` at limits 0.02, 0.05 and 0.1 gives `crop=3840:1920:0:0` on all 44 samples. **Correction (2026-10-28, Phase 4 slice 2):** that result was weaker than I first wrote. Limited-range black is about 0.063 (16/255, or 64/1023), so limits of 0.02 and 0.05 are below black and detect nothing in any file; only the 0.1 result carries information. At limit 0.2 it produces false crops on dark frames (for example 2884x1392). Calibration on noisy letterboxed SDR and PQ fixtures (now a test) found the matte from 0.063 upward, so the analyzer default is 0.094. Brightness of the keyframes (10-bit YAVG, black = 64) ranged 205 to 375.
 - **The zoom for this file is 0.8510** (a 2.00:1 active picture), and the R6 fallback (contain by the container's display ratio) gives the same answer, because the container itself is 2:1. It is therefore a native-ratio-container sample for the "native 2.39 encode" slot, and a test of the fallback.
 - **Not tested on the Shield.** Whether Kodi plays profile 8.1 as HDR10 on this chain, and whether HDR10+ metadata passes, is untested; the clip is ready for a playback test.
 
@@ -192,7 +192,7 @@ No requirement is missing from the design, and none of the ten lessons is repeat
 | ID | Change | Why |
 |---|---|---|
 | DD14 | The analyzer must choose the video stream by disposition and ignore attached pictures | This file has a JPEG cover-art stream (index 30) next to the real video (index 0); *Avatar*'s video is index 1 |
-| DD15 | Keep `cropdetect` limits per transfer, expressed as fractions, with 0.02 to 0.1 as the starting range for PQ | Stable at 0.1, false crops at 0.2 on this file |
+| DD15 | Keep `cropdetect` limits per stream, expressed as fractions of the luma scale, **above the black level** (about 0.063 for limited range in 8 and 10 bits); default 0.094. Corrected in slice 2: the first draft said 0.02 to 0.1 | Below 0.063 nothing counts as black; at 0.2 dark picture content produces false crops |
 | DD16 | Take the display ratio from the container's display aspect ratio (SAR applied) for the fallback | The 2:1 container gives the right answer with no analysis |
 
 **R8 after the gate:** the Gap narrows. An HDR10+ sample exists; profile 5 is out of scope; interlaced is accepted as untested. The remaining R8 work is the planned synthetic fixtures.
