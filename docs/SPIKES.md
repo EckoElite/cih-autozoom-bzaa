@@ -1,4 +1,4 @@
-# SPIKES (Phase 2): in progress
+﻿# SPIKES (Phase 2): in progress
 
 Only Spike A has been started. Nothing below is a recommendation yet; the decision matrix is filled in at the end of Phase 2.
 
@@ -102,6 +102,43 @@ The two misses were both one frame late (offsets +0.8 and +0.86 frames), at the 
 
 **Keyframe probe run (2026-10-28, IMG_8349).** Set-up: the add-on, with a probe timeline of 18 single small zoom changes between 1.0 and 0.985 (about 4.5 px of plate width), nine near keyframes (offsets -16 to +16 frames from keyframes at 250k) and nine mid-GOP. The add-on's log: 18 of 18 sent, none failed, worst lateness 0.07 ms. In the 240 fps part of the clip (changes at frames 125 to 1875: 15 of the 18, including keyframe neighbours at 238, 492, 746, 1000, 1254, 1508 and 1762) the content counter stayed on the 240 fps line with **no step of more than one content frame** (steps over 1.5 frames in the residual would have shown). No freeze and no skip near any of those keyframes. The changes at 2016, 2125 and 2234 fall in the tail and were not examined; in particular a zoom change right at the keyframe at frame 2000 is untested. Caveat: I only counted readable frames with a stable code, and the code is hard to read for a few frames around each zoom change, so a skip inside that window could be missed. The step is too small (4.5 px against an 8 px matching tolerance) for `analyze_boundary.py`, so this run gives no timing data. **Result: R4 (no stutter caused by the system) has no counter-evidence in the 15 changes examined; the stall hypothesis is dropped.** Still open: the frame-4 hold at the start of playback, and whether the 1-frame excursion at frame 1860 in the eased ramp is real.
 
+## Spike B: Plezy's built-in mpv (source reading, 2026-10-28; nothing run on the Shield yet)
+
+Read from a shallow clone of `github.com/edde746/plezy` at commit `ffe7d79` (version 2.25.0+157, GPL-3.0). Everything below is **from reading the code**; none of it has been run or measured on the Shield, and I did not open the native C patches in the separate `edde746/mpv-build` repository.
+
+| Question (from the spec) | Answer from the source | Where |
+|---|---|---|
+| Which engine does Plezy use on Android? | mpv by default. ExoPlayer is an opt-in setting (`android_use_exoplayer`); a code comment says every install was moved to mpv. The custom mpv config applies only when mpv is the engine | `settings_service.dart`, `video_player_screen.dart` (lines 1715 to 1851, 2101) |
+| How is mpv embedded? | Flutter app with a Kotlin core (`MpvPlayerCore.kt`, 3,334 lines; the `mpv` Kotlin folder is 15 files, about 5,000 lines) over libmpv from a prebuilt, checksum-pinned AAR built by the project's own `mpv-build` repo (mpv 0.41.0, FFmpeg 8.0.1, patched) | `mpv-build.lock.json`, `MpvPlayerCore.kt` |
+| Video output and hardware decoding | Hardware sessions use a **forked `vo=mediacodec`**: decoder buffers go straight to a SurfaceView with per-frame presentation timestamps, 10-bit and the decoder's HDR10/HLG dataspace kept, subtitles and OSD on a second, full-size surface. Software sessions use `gpu`/`gpu-next`. A stream the plane cannot take (codec outside the hardware list, a Dolby Vision profile 5 file needing RPU reshaping) is moved to a GL output | `MpvPlayerCore.kt` (lines 171 to 195, 1129 to 1157) |
+| Does `video-zoom` work, and how? | It is accepted (log2 value, clamped to -2..+2, so 0.25x to 4x), but **on the hardware path it is not an mpv transform**: Kotlin resizes the video SurfaceView on the main thread (`VideoRectPolicy.sizeFor`, `applyVideoRectLayout`) and the container clips the overflow. The video is always centred (`Gravity.CENTER`) | `VideoRectPolicy.kt`, `MpvPlayerCore.kt` (lines 1954 to 1993, 2741 to 2747) |
+| Vertical shift? | **Not available.** No handling of `video-pan-x/y` or `video-align-y` exists in the Kotlin core, so shifting the picture within the band would be new code | search of `MpvPlayerCore.kt` |
+| What does the "custom mpv configuration" accept? | A text of `key=value` lines, parsed once and applied **once per playback** with `setProperty` after start-up (a few app-owned properties are skipped). So `video-zoom=-0.4` is one fixed zoom for every title | `video_player_screen.dart` (lines 2105 to 2139) |
+| Lua scripts, IPC socket? | **None.** No `input-ipc-server`, script loading or `.lua` anywhere in the source. mpv's `ytdl` is switched off | search of the whole tree |
+| Any control channel? | Only a debug one: the "agent control" service is compiled out of release builds (`!kReleaseMode`) and is reachable only through the Dart VM service. Inside the app, Dart can call `setProperty`, `getProperty`, `command` and read a position stream | `agent_control_service.dart`, `player.dart`, `player_streams.dart` |
+
+**What this means for the requirements (my reading, untested):**
+
+- **Static zoom works today with no code** (one line in Plezy's mpv config), but it applies to every title, so it only serves as a test of the geometry and of HDR output, not as a solution.
+- **R1 and R2 need a fork.** A fork would add the timeline fetch and scheduler (Dart) and the zoom and shift (Kotlin). The cheapest place to apply a zoom is the SurfaceView relayout above. That is a view change on the Android main thread, queued behind Plezy's serialised write queue, so I expect it not to be frame-locked. Kodi's zoom change was frame-locked and sat 7.7 frames behind the command with a spread of 0.23 frames; whether a relayout can do as well is **unknown until measured**. Per-frame relayouts for ramps (R2) are an open risk: a resized SurfaceView may reallocate its buffer and flash or drop frames.
+- **A frame-locked version would live in the native `vo=mediacodec`** (C, in `mpv-build`), applied when each buffer is released. That means rebuilding the libmpv AAR with the Android NDK and carrying a patch against a moving mpv fork. I have not read that code, so I can only say it is the expected place, and the effort is high.
+- **R13 (subtitles inside the band):** the subtitle/OSD surface stays full-container, so subtitles would sit outside the band unless margins are changed too.
+- **HDR10 and DV:** the plane keeps the decoder's HDR dataspace and a SurfaceView resize does not touch the decoder, so I expect HDR10 to survive a zoom (assumption). Dolby Vision profile 5 goes through a different path; profile 7 and 8 behaviour under zoom is unknown.
+- **Other requirements Plezy already covers:** display refresh-rate matching (`FrameRateManager`) and audio passthrough (`audio-spdif`) exist in the code; I have not tested either with this project.
+
+**Fork effort and upkeep (estimate from the repository, not from a build):**
+
+| Item | Finding |
+|---|---|
+| Patch surface | Kotlin core (zoom, shift, timeline-driven changes), a Dart scheduler and timeline client, settings. A frame-locked version adds native patches and an AAR rebuild |
+| Upstream churn | **223 commits in the 30 days to 2026-10-28**, releases 2.20 to 2.25 in the recent list. The file I would change most (`MpvPlayerCore.kt`) is the core of the player, so conflicts on every rebase are likely |
+| Build tools | Flutter 3.47 or newer (Dart 3.12), Android SDK and a JDK. None was in the Phase 0 tool check, so these would be new installs (ask first). The stock build downloads the prebuilt AAR |
+| Licence | GPL-3.0; a fork stays GPL-3.0 and its source must be published to anyone given the APK |
+
+**Not done yet, and what it needs from you:** the spec's on-device test of a static `video-zoom` with HDR10 and Dolby Vision through Plezy's custom config. It would show whether the surface-resize path puts the 1.78 ratio frame's borders on the screen edges at the same zoom as Kodi (0.7565, which is `video-zoom` of about -0.403) and whether HDR stays on. It changes a setting in Plezy on the Shield, so I will only do it with your go-ahead. Steps would be: Plezy settings, mpv configuration, add the one line, play the HDR10 calibration video from the Plex library, then remove the line.
+
+**Provisional position for the matrix (Spike B column), source reading only:** live timed zoom not possible without a fork; frame accuracy, glitch on change and ramp smoothness unknown and risky; build effort high; maintenance risk high; fits the Plezy workflow best of all routes because it is the front end already.
+
 ### Earlier rough latency from the first HDR10 video (4 transitions; superseded by the measurement above)
 
 Method: each zoom command was sent from the PC just before the next ratio frame's own picture change (the video file switches content at 10 s, 20 s, ...). In the phone video I found the frame where the zoom changes and the frame where the content changes, and compared. The command's lead over the content change comes from the logged player clock (read by polling every 100 ms).
@@ -153,6 +190,6 @@ How it will be used: send each cut's zoom `lead` seconds before the cut, varying
 4. **Opens fail at random.** `Player.Open` over HTTP sometimes fails with "error opening" (Kodi sends HEAD, HEAD, one ranged GET, then drops the connection). It came in bursts of a few minutes, ended on its own, and hit files that opened fine minutes later (including identical copies). Stop-and-wait did not prevent it; retries eventually worked. Cause unknown. Test scripts must retry and verify that playback actually started.
 5. **Repeat mode persists.** A `Player.SetRepeat` to `one` from an earlier test stayed set, so the HDR10 file looped at the end. Reset repeat explicitly at the start of a run.
 
-## Spike B, C, D
+## Spikes C and D
 
-Not started.
+Not started. (Spike B: source reading done, see above; its on-device test is waiting for the user's go-ahead.)
