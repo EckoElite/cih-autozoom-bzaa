@@ -43,7 +43,7 @@ Routes: **A** = Kodi's internal player with the in-Kodi add-on. **B** = Plezy's 
 
 **Optional on-device checks that would firm this up** (each needs your go-ahead; none is required for the gate): a Dolby Vision file played under zoom on route A; re-filming the full boundary video with the recording kept running at least 30 s after the end; the mpv-android HDR check; the Kodi intent test with the PC test video.
 
-**GATE:** please choose the route (A, B, C or D) and, for route A, the front end (PM4K or Plezy hand-off).
+**GATE decision (2026-10-28): route A with PM4K as the front end.** The user answered "PM4K" to a question that asked for the route and the front end, so I read it as route A with PM4K. The R2 acceptance ("at most 1 frame", target 0 not met) was in the same message but was not confirmed separately; it is carried into Phase 3 as a Risk row to confirm. The user also asked for a Shield home-screen shortcut that goes straight to PM4K (see PROGRESS.md).
 
 ## Spike A: Kodi internal player (Kodi 21.2 on the Shield, MediaCodec on)
 

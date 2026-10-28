@@ -118,7 +118,9 @@ Kodi/serving notes: Kodi plays the original 100 s file from the PC's range serve
 
 **Spikes B, C and D: source reading done (2026-10-28), no on-device tests yet.** B (Plezy's mpv): a timed zoom needs a fork; zoom is a SurfaceView relayout, frame accuracy unknown. C (Plezy to Kodi): works, but Kodi ignores the resume position and returns no result, so resume and Plex progress sync would be lost. D (mpv-android): best geometry tools, resume and sync work, but HDR10 and Dolby Vision output and refresh-rate switching are probably lost. Pending on-device tests, each needing your go-ahead: B static zoom setting in Plezy, C intent test with the PC test video, D install of mpv-android (a download) and an HDR check.
 
-**Not started:** the decision matrix and the route-choice GATE.
+**Decision matrix written and the route-choice GATE passed (2026-10-28):** route A (Kodi's internal player with the in-Kodi add-on), PM4K as the front end. See `docs/SPIKES.md`. Phase 2's optional on-device checks (Dolby Vision under zoom, a re-filmed full boundary video, mpv-android HDR, the Kodi intent test) are not done and are not required.
+
+**Shield shortcut to PM4K (user request, read-only findings 2026-10-28, nothing changed yet):** the home launcher on the Shield is Projectivy (not the stock Android TV home). Kodi has a launcher entry (`org.xbmc.kodi/.Splash`). PM4K 1.0.6 (`script.plexmod`) is installed as a script add-on with a service, and Kodi's favourites already hold a "PM4K for Plex" item. Kodi's userdata has no `autoexec.py`. PM4K has no path mapping configured. A direct Android shortcut into PM4K is not possible, because Kodi's intent handling only plays media; the route is a Shield home shortcut to Kodi plus a Kodi `autoexec.py` that starts PM4K at Kodi start-up.
 
 **Assumed, not verified:** HDR10 and Dolby Vision land on the same rows as SDR (see Phase 1); the 316 ms add-on lead carries over to other files, refresh rates and Kodi settings (one file, one capture).
 
