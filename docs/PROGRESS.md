@@ -126,6 +126,16 @@ Kodi/serving notes: Kodi plays the original 100 s file from the PC's range serve
 
 **Assumed, not verified:** HDR10 and Dolby Vision land on the same rows as SDR (see Phase 1); the 316 ms add-on lead carries over to other files, refresh rates and Kodi settings (one file, one capture).
 
+## Phase 4 decisions taken (2026-10-28)
+
+| Question | Answer |
+|---|---|
+| `scope_fill` for 2.39 and 2.40 | **Off**: fit with thin bars, nothing cropped |
+| Extras and trailers | **Skip** (feature films and episodes only); extras use the contain-by-display-ratio fallback |
+| Pause while Plex transcodes | **Yes**: pause the analyzer during transcodes; low CPU and disk priority regardless |
+| YouTube library | **Skip** (user does not watch it from Plex); no host path needed |
+| Quiet hours | Not asked; default is none, configurable (`QUIET_HOURS`) |
+
 ## Phase 3 GATE passed (2026-10-28)
 
 The user answered all five items: G1 accept R2 at 1 frame, G2 defer subtitles (R13), G3 Dolby Vision not a concern (HDR10+ sample: *Carrie* S01E06, checked: crop detection works, no mattes, 2.00:1 native container, zoom 0.8510), G4 *Catching Fire* confirmed, G5 accept a short wrong-zoom time after seek or start. Details in `docs/AUDIT_1.md` section 10. Phase 4 questions are the next thing to ask.
