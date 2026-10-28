@@ -116,7 +116,9 @@ Kodi/serving notes: Kodi plays the original 100 s file from the PC's range serve
 
 **Open in Spike A:** Dolby Vision with zoom; how many frames show the wrong zoom at the start of playback (per-file saved view); near-black ramp and the linear ramp's later part (re-film with the recording kept running at least 30 s after the video ends); the frame-4 hold at the start of playback (likely an HDMI mode switch, untested); a zoom change exactly at the keyframe at frame 2000; the one-frame excursion at frame 1860.
 
-**Not started:** Spike B (Plezy's mpv), Spike C (Plezy to Kodi hand-off), Spike D (mpv-android), the decision matrix, and the route-choice GATE.
+**Spikes B, C and D: source reading done (2026-10-28), no on-device tests yet.** B (Plezy's mpv): a timed zoom needs a fork; zoom is a SurfaceView relayout, frame accuracy unknown. C (Plezy to Kodi): works, but Kodi ignores the resume position and returns no result, so resume and Plex progress sync would be lost. D (mpv-android): best geometry tools, resume and sync work, but HDR10 and Dolby Vision output and refresh-rate switching are probably lost. Pending on-device tests, each needing your go-ahead: B static zoom setting in Plezy, C intent test with the PC test video, D install of mpv-android (a download) and an HDR check.
+
+**Not started:** the decision matrix and the route-choice GATE.
 
 **Assumed, not verified:** HDR10 and Dolby Vision land on the same rows as SDR (see Phase 1); the 316 ms add-on lead carries over to other files, refresh rates and Kodi settings (one file, one capture).
 
