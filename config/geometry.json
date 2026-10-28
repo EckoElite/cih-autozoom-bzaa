@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "status": "provisional: measured by eye from phone photos (SDR chart, Kodi Normal view, zoom 1.0); HDR10 and a straight-on re-check still to do",
+  "status": "accepted by the user on 2026-10-28 as the working geometry. Measured by eye from phone photos (SDR chart, Kodi Normal view, zoom 1.0). HDR10 was not measured separately; a straight-on re-check was not done",
   "output": {"width": 3840, "height": 2160},
   "screen_ratio_nominal": 2.35,
   "measured": {

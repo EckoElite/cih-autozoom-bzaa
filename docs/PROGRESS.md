@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Current phase:** 1 (Geometry calibration): videos built and verified; waiting for the user's on-screen readings
+**Current phase:** 1 (Geometry calibration) complete on 2026-10-28 (SDR numbers accepted by the user); Phase 2 (player spikes) next
 **Last updated:** 2026-10-28
 
 Site-specific facts (LAN addresses, share and library paths, film titles, per-file probe results) are kept in `docs/LOCAL_FACTS.md`, which is gitignored so this public repo does not carry them. Secrets live only in `.env` (also gitignored).
@@ -97,12 +97,10 @@ Carried forward (none blocks Phase 1):
 
 `config/geometry.json` is written as **provisional**. The design band stays at the nominal rows 263 to 1897 (height 1634), because that band is inside the measured band even at the worst ends of the tolerances, so fitting to it cannot spill past the screen. `tools/zoom_table.py` regenerates the section 5.3 table from it; the output matches the spec to within 0.0001 (the spec's own rounding). Vertical shift is 0 px for every ratio, since the band is centred.
 
-Still open for Phase 1: the same reading with the HDR10 file (to confirm HDR does not move the geometry), a straight-on close-up of the top edge, and the user's confirmation of the table. The measured edges came from photos taken at an angle; tolerances above are my estimates.
+The user accepted the SDR numbers and the regenerated table on 2026-10-28 and chose to skip the HDR10 reading and the straight-on top-edge close-up. So: **assumed, not measured**, that HDR10 and Dolby Vision output land on the same rows as SDR (same output frame; the projector's HDR mode could change image size or position). This is checked in Phase 2 by looking at a zoomed ratio frame while HDR is active. The measured edges came from photos taken at an angle; tolerances above are my estimates.
 
 Kodi/serving notes: Kodi plays the original 100 s file from the PC's range server, but files made by looping the 10 s chart with `-stream_loop` fail to open (Kodi sends HEAD, HEAD, a ranged GET, then drops the connection; cause not found). A paused video shows Kodi's seek bar over the bottom of the picture, so the chart must be photographed while playing, not paused.
 
 ## Next
 
-1. Repeat the reading with `cal_hdr10_2160p.mkv` (play, do not pause) to confirm the geometry is the same in HDR.
-2. A straight-on close-up of the top edge (optional, to tighten the top tolerance).
-3. User confirms `config/geometry.json` and the regenerated table, then Phase 1 exits.
+Phase 2 (player spikes, ends at the route-choice GATE). Order proposed: Spike A (Kodi internal player: `Player.SetViewMode` numeric zoom and vertical shift, live, with MediaCodec on), which also checks that zoom 0.7565 puts the 1.78 ratio frame's borders on the screen edges and whether HDR10 geometry matches SDR; then the frame-accuracy test video; then Spikes B to D (Plezy's mpv, Plezy to Kodi hand-off, mpv-android), which are mostly source reading until we choose to test them on the Shield.
