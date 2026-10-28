@@ -19,13 +19,14 @@ Test material was streamed to Kodi over HTTP from the PC (`tools/range_server.py
 | Reset | `{"viewmode": "normal"}` returns zoom 1.0, shift 0.0, mode `normal` |
 | API call time | A `SetViewMode` call returns in about 7 to 25 ms; the new value reads back on the first poll (about 23 ms). A plain `GetViewMode` round trip averages about 17 ms. **This says nothing about when the picture changes on the screen** (needs the slow-motion test) |
 | Absolute seek | Works with `{"value": {"time": {"hours":0,"minutes":1,"seconds":40,"milliseconds":0}}}`, landing within about a second. `{"value": {"seconds": 100}}` is **relative**, not absolute |
-| Zoom geometry on screen (user's photos) | At the section 5.3 zoom values, the 1.90 frame (0.8085) and the 2.00 frame (0.8510) have their top and bottom borders on the screen's top and bottom edges and their side borders inset by about the expected amount (about 81% and 85% of the screen width). The 2.35 frame (zoom 1.0) shows its border on all four edges; the 2.39 frame (zoom 1.0) shows a thin black bar inside the top and bottom, as expected |
+| Zoom geometry on screen, SDR, all seven ratios (user's phone photos) | At the section 5.3 zoom values every ratio frame has its top and bottom borders on the screen's top and bottom edges, and its side borders inset by roughly the expected amount (1.33 about 56% of the screen width against 56.7% expected; 1.90 about 81% against 80.9%; 2.00 about 84% against 85.1%). The 2.35 frame (zoom 1.0) shows its border on all four edges; the 2.39 frame (zoom 1.0) shows a thin black bar inside the top and bottom, as expected. A close-up of the 1.33 frame shows the top border about 4 to 5 rows inside the screen's lit top edge and the bottom border about 3 to 4 rows inside, which is what the measured band (rows 258 to 1901) against the design band (263 to 1897) predicts. Photo-to-photo variation in side widths is about 2%, from the camera angle |
+
+A first pass over 1.33, 1.78 and 1.85 showed an unzoomed picture; the photos were saved by ShareX after the run, and my script applied each zoom 1 s after its segment started, so they were most likely taken in that first second. A re-run that set the zoom first (Kodi read back 0.7565, 0.7565 and 0.7872) and fresh photos showed all three zoomed correctly.
 
 ### Not yet confirmed
 
 | Question | State |
 |---|---|
-| 1.33, 1.78 and 1.85 frames at their zoom values | The three photos show the picture **unzoomed**. The photos' timestamps are when ShareX saved them, not when they were taken, and my script applies each zoom 1 s after its segment starts, so they may simply have been taken in that first second. Needs a re-run with the zoom applied before the photo |
 | Vertical shift units | Direction and size on screen not measured (the design band is centred, so every table entry uses a shift of 0) |
 | HDR10 and Dolby Vision stay active while zoomed, and the HDR10 geometry matches SDR | Not tested |
 | Zoom latency and jitter in frames; glitch on change (black flash, dropped frame) | Needs the boundary test video and a slow-motion clip |
