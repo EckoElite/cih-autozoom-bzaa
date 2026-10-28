@@ -190,6 +190,30 @@ How it will be used: send each cut's zoom `lead` seconds before the cut, varying
 4. **Opens fail at random.** `Player.Open` over HTTP sometimes fails with "error opening" (Kodi sends HEAD, HEAD, one ranged GET, then drops the connection). It came in bursts of a few minutes, ended on its own, and hit files that opened fine minutes later (including identical copies). Stop-and-wait did not prevent it; retries eventually worked. Cause unknown. Test scripts must retry and verify that playback actually started.
 5. **Repeat mode persists.** A `Player.SetRepeat` to `one` from an earlier test stayed set, so the HDR10 file looped at the end. Reset repeat explicitly at the start of a run.
 
-## Spikes C and D
+## Spike C: Plezy hands off to Kodi as the external player (source reading, 2026-10-28)
 
-Not started. (Spike B: source reading done, see above; its on-device test is waiting for the user's go-ahead.)
+Read from Plezy 2.25.0 (commit `ffe7d79`) and Kodi's `21.2-Omega` source (`XBMCApp.cpp`, the Android manifest template). One read-only query to your Plex server confirmed the URL shape (token not printed). **Nothing was run on the Shield.**
+
+| Question (from the spec) | Answer | Basis |
+|---|---|---|
+| Can Plezy launch Kodi? | **Yes, as a custom player.** Android external players are started with `startActivityForResult` and an `ACTION_VIEW` intent (`type=video/*`, data = the stream URL). The built-in list is VLC, mpv, MX Player and Just Player, plus System Default; a custom entry of type "command" takes an Android package name, so `org.xbmc.kodi` fits. Plezy offers external players on Android, and the setting "use external player" decides when it is used | `external_player_service.dart`, `external_player_models.dart`, `ExternalPlayerChannel.kt`, `platform_detector.dart` |
+| What does it hand over? | The Plex **part URL**: server base URL + the part's `key` + `?X-Plex-Token=<token>`. Verified on your server: the key is `/library/parts/<partId>/<updatedAt>/file.mkv`, and `<partId>` equals the part's `id` in the metadata. Extras added to the intent: title, file name, a start position (MX Player and Vimu key names), `return_result`, and external subtitle files | `plex_playback_mapper.dart` (line 89), Plex API query, `ExternalPlayerChannel.buildIntent` |
+| Does Kodi accept it? | Kodi declares a `VIEW` filter for `video/*` with `http` and `https` among its schemes. `onNewIntent` takes the data URL as a string and posts a plain play request. It reads **no extras**: no start position, no title | Kodi manifest template lines 65 to 89, `XBMCApp.cpp` lines 1479 to 1531 and 1703 to 1730 |
+| Does watched progress sync back? | **Not by itself.** Plezy reports progress only from a position that the external player returns in its result, and Kodi sets no result (`onActivityResult` is empty; no `setResult` in the file). Kodi is also declared `singleInstance`, which I expect makes Android return a cancelled result at once rather than at the end of playback (not verified). So Plezy would learn nothing and Plex would not record progress | `external_player_service.dart` (`_reportExternalProgress`), `XBMCApp.cpp` |
+| Resume from position? | **No.** The start position goes in extras Kodi ignores, so Kodi starts at 0 unless it has its own bookmark for that exact URL | same |
+| Can a Kodi add-on get the Plex part ID? | **Yes.** `xbmc.Player().getPlayingFile()` returns the URL, and the part ID is the number after `/library/parts/`. That matches the spec's lookup by part ID (R9). Not run on the Shield | URL shape above, Kodi Python API |
+
+**What this means (my reading):**
+
+- The hand-off gets the video into Kodi's internal player, which is Spike A's route (frame-accurate zoom with the in-Kodi add-on, 25 of 25 cuts within 1 frame). The zoom side works; the gaps are around it.
+- **Gaps:** no resume, no watched-state sync, and the user is left in Kodi's own menus afterwards. Whether Back returns to Plezy is untested. To close them, the add-on would have to read the viewing offset from Plex by part ID, seek to it, and report progress to Plex itself (the Plex `timeline` call). That reimplements what PM4K already does, and it puts the token in the add-on.
+- **Token in the URL:** the URL carries the Plex token, so it appears in Kodi's log and playing-file field. The add-on must redact it, as the spec already requires for logs.
+- **Alternative in the same family:** PM4K (`script.plexmod`, already installed in Kodi) plays Plex items inside Kodi's own player and handles Plex resume and progress itself. It reaches the same Spike A route without an app-to-app hand-off. Its UI was your reason for considering it. I have not looked at its source.
+
+**Not done, and what it would involve:** an on-device test of the intent path. The safe version uses the PC's test-video URL (no Plex token) and sends `adb shell am start -a android.intent.action.VIEW -d <url> -t video/* org.xbmc.kodi`, which would play the boundary video on the projector and exercise the add-on. I would not use a Plex URL for that test, because Android can echo intent data, token included, into its logs. It plays a video on the Shield, so I will only run it with your go-ahead.
+
+**Provisional position for the matrix (Spike C column), source reading only:** zoom, frame accuracy, glitch behaviour and ramps inherit Spike A (route is Kodi's internal player); HDR10 kept (measured in Spike A), DV untested; seek/resume hooks: the add-on has them, but resume and progress sync to Plex do not exist yet; fits the Plezy workflow partly (launch from Plezy, lose its resume and progress); build effort medium (add-on grows a Plex client); maintenance risk lower than a Plezy fork, since Kodi's add-on API is stable.
+
+## Spike D: mpv-android as Plezy's external player
+
+Not started.
