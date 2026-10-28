@@ -69,6 +69,31 @@ Installed with `tools/spike_a/install_addon.ps1 -Install` (5 files, Kodi restart
 
 Offline tests (`python -m unittest discover -s players/kodi/tests -v`, 12 tests, all pass): timeline and zoom-at-frame logic, floats in the request, scheduler accuracy against a simulated noisy clock (worst send error 1.9 ms with a player readout noisy to 15 ms; 7.9 ms at 50 ms; 31 ms at 200 ms, so the test is sensitive), per-frame ramp cadence, overdue-event coalescing, stop flag, and a real-time smoke test of `service.py` against stand-in `xbmc` modules. The tests cannot show how Kodi behaves; that needs the Shield run. `tools/spike_a/install_addon.ps1` installs, removes and pulls logs over adb, and runs nothing unless a switch is given.
 
+### Frame-accuracy test, Spike A with the in-Kodi add-on (2026-10-28; same video, same 240 fps capture method)
+
+Set-up: the add-on installed above, enabled; the PC only started playback and sent no zoom commands. The add-on used one fixed lead of 316 ms for every cut and every ramp frame. Its own log (pulled from the Shield): all 244 commands sent, none failed, none dropped, each within 0.64 ms of target on its own clock estimate (median 0.02 ms), each `executeJSONRPC` call 0.2 to 1.3 ms (median 0.33 ms); the run ended "finished 244 of 244".
+
+**Hard cuts, 25 measurable of 28 (same exclusions as before):**
+
+| | PC-driven over the network (lead varied) | In-Kodi add-on (fixed 316 ms lead) |
+|---|---|---|
+| Delay from command to picture, mean | 0.316 s (7.6 frames) | 0.319 s (7.7 frames) |
+| Spread of that delay, standard deviation | 0.039 s (0.93 frames) | **0.010 s (0.23 frames)** |
+| Spread, full range | 3.2 frames | **0.9 frames** |
+| Zoom lands on exactly the right frame (fixed lead) | 9 of 25 (calculated from the measured delays) | **23 of 25** |
+| Within 1 frame | 23 of 25 | **25 of 25** |
+| Worst case | 2 frames | **1 frame (late)** |
+
+The two misses were both one frame late (offsets +0.8 and +0.86 frames), at the first cut (frame 48, shortly after the 0.12 s clock calibration) and at frame 408; none was early. So the fixed 316 ms lead is right, and moving the command inside Kodi cut the spread by about four times. Against R2 (target 0, acceptance at most 1 frame): **acceptance met in this sample (25 of 25 within a frame), target not met (23 of 25 exact).**
+
+**Ramps (a new zoom for every frame, lead 316 ms):**
+- Eased: displayed zoom against commanded zoom for the same frame, with no shift: mean absolute error 0.0037, which is one pixel of plate width (0.0033), my measurement resolution; worst 0.0096 (about 1.5 frames of ramp progress, the largest commanded step being 0.0064); no reversals. One isolated one-frame excursion at frame 1860 (0.038, about 11 px), then back on the curve the next frame; whether that is a real one-frame wobble or a measurement blip is not known.
+- Linear: the first 54 frames follow the command the same way (mean 0.0037, worst 0.0084, no reversals); after that, the playback stall below.
+- Near-black: still unmeasurable (code unreadable).
+- The earlier PC-driven result (displayed zoom about 5.7 frames behind the command's frame, lag swinging between 4 and 7 frames) is gone: with the add-on the lag is 0 frames.
+
+**Playback stall, reproduced.** In this run too, during the linear ramp the video froze around content frame 1994 to 1997, then jumped to exactly frame 2068 (the same landing frame as in the first run), played about 8 times fast for a while to catch up, and ended early. Seen in the camera frames (F 01994 on screen for at least 0.17 s, then F 02068, then +32 frames per 4 frames of real time). It happened with zoom commands coming from the PC and from the add-on, which says the cause is not who sends them. What is known: the file is 6.7 MB and keyframes are every 250 frames (one at 2000); the stall starts about 5.59 MB into the file, just before the keyframe, where packets get large (up to 28.6 KB at frame 2000); the file server saw only the two start-up requests and no reconnects, and Kodi buffers a file this size early, so it is not a network read; Kodi's log at info level shows no decoder message. Not yet tested: whether it happens with no zoom commands at all, from a local copy, or after re-encoding with a different keyframe layout.
+
 ### Earlier rough latency from the first HDR10 video (4 transitions; superseded by the measurement above)
 
 Method: each zoom command was sent from the PC just before the next ratio frame's own picture change (the video file switches content at 10 s, 20 s, ...). In the phone video I found the frame where the zoom changes and the frame where the content changes, and compared. The command's lead over the content change comes from the logged player clock (read by polling every 100 ms).
