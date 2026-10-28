@@ -83,8 +83,23 @@ Carried forward (none blocks Phase 1):
 | Plex URL and token, library paths | Done, verified (token valid; 13 libraries; movies path chain checked) |
 | Local sample set | Partly: real clips for 16:9, 2.2:1, DV profiles 7 and 8, and a clip the user called 4:3 (measured about 1.67 in the section cut); stand-ins for native 2.39 and non-square pixels. Variable-ratio clips deferred to analyzer output |
 
+## Phase 1 first pass (user's phone photos of `cal_sdr_2160p.mkv`, Kodi internal player, view mode Normal, zoom 1.0; read by eye from 12 photos, preliminary)
+
+| Item | Reading | Confidence |
+|---|---|---|
+| Left and right edges | All left ticks L0 to L120 and right ticks R0 to R120 are on screen, and the 4 px white frame border is visible at both side edges. The image is not clipped sideways | Good (photos show it directly) |
+| Top edge | About row 256 to 263. The first full label at the screen's top edge is row 288; labels for rows 256 to 268 are partly cut by the edge | Rough: the photos are taken at an angle |
+| Bottom edge | About rows 1885 to 1900, from slivers of the 1888 to 1896 labels | Weak: Kodi's pause bar covers the bottom group in every chart photo |
+| 2.35 ratio frame (rows 263 to 1896) | The orange border is visible on all four screen edges | Good, but it only bounds the band to within a few px |
+| 2.39 frame (rows 277 to 1882) | Border visible on all four edges | Consistent with the above |
+| 2.00, 1.90, 1.85 frames | Top and bottom borders off screen, side borders on screen | Consistent |
+
+Not established: `band_top` and `band_bottom` to within a few px. Cause: the pause bar hides the bottom rows, and the photos are angled. `config/geometry.json` is not written yet.
+
+Kodi/serving notes: Kodi plays the original 100 s file from the PC's range server, but files made by looping the 10 s chart with `-stream_loop` fail to open (Kodi sends HEAD, HEAD, a ranged GET, then drops the connection; cause not found). A paused video shows Kodi's seek bar over the bottom of the picture, so the chart must be photographed while playing, not paused.
+
 ## Next
 
-1. User at the projector: play `cal_sdr_2160p.mkv` on the Shield in Kodi (view mode Normal, zoom 1.0), report the row number on the screen's top edge and bottom edge, and the L/R tick at each side edge. Not yet done; nothing has been played on the Shield.
+1. Get a clean chart reading: play `cal_sdr_2160p.mkv` (the chart is its first 30 s, no pause bar while playing) and have the user read or photograph the top and bottom edges straight-on and close up.
 2. Write `config/geometry.json` (`band_top`, `band_bottom`, measured ratio, centred or not) and a script that regenerates the section 5 table from it.
 3. Repeat the reading with the HDR10 file to confirm the geometry is the same in HDR.
