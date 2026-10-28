@@ -23,6 +23,33 @@ Test material was streamed to Kodi over HTTP from the PC (`tools/range_server.py
 
 A first pass over 1.33, 1.78 and 1.85 showed an unzoomed picture; the photos were saved by ShareX after the run, and my script applied each zoom 1 s after its segment started, so they were most likely taken in that first second. A re-run that set the zoom first (Kodi read back 0.7565, 0.7565 and 0.7872) and fresh photos showed all three zoomed correctly.
 
+### HDR10 run (2026-10-28; 60 fps phone video of the screen, 10 s per ratio)
+
+| Question | Result |
+|---|---|
+| Does the zoom apply to an HDR10 file? | Yes. All seven ratio frames show the same geometry as in SDR (contact sheet and frames from the video): top and bottom borders on the screen's top and bottom edges for 1.33 to 2.00, the 2.35 border on all four edges |
+| What does Kodi report? | `VideoPlayer.HdrType` = `hdr10`, resolution 4K, codec hevc, during every segment, with the zoom changing. This is Kodi's reading of the stream, not what the projector received |
+| Is HDR active at the projector? | **Not answered.** The user has not yet reported the projector's signal info |
+| Black flash at a zoom change? | None seen in the three transitions examined frame by frame (19.7 s, 39.5 s, 49.9 s of the video). Each change shows one phone frame that blends the old and new picture (double-exposed text), then the new picture. A 60 fps phone cannot tell whether that blend is real or comes from the projector's processing or the camera |
+| Other glitches | Single-frame artifacts at about 20.5 s (a horizontal colour band) and a few in the first 1.5 s, not tied to a zoom change. Cause unknown |
+
+### Rough zoom latency from that video (4 transitions, **not** the Phase 2 acceptance test)
+
+Method: each zoom command was sent from the PC just before the next ratio frame's own picture change (the video file switches content at 10 s, 20 s, ...). In the phone video I found the frame where the zoom changes and the frame where the content changes, and compared. The command's lead over the content change comes from the logged player clock (read by polling every 100 ms).
+
+| Boundary | Command lead over the content change | Zoom change vs content change in the video | Implied command-to-picture delay |
+|---|---|---|---|
+| 1.78 to 1.85 | about 0.20 s | Same phone frame | about 0.20 s |
+| 1.85 to 1.90 | about 0.27 s | One event only (probably the same frame; the zoom step is small) | about 0.2 to 0.3 s |
+| 1.90 to 2.00 | about 0.33 s | Zoom changed 0.17 s before the content | about 0.16 s |
+| 2.00 to 2.35 | about 0.20 s | Same phone frame | about 0.20 s |
+
+Reading: a constant delay of about 0.2 s (about 5 frames at 23.976 fps) fits the four points to within about 0.05 s (about 1 frame at 23.976, 3 frames at the phone's 60 fps). Caveats, all material:
+- Four transitions, one capture, phone timing only. The acceptance test needs at least 20 boundaries and a frame counter.
+- The delay is measured against the *displayed* content, using the player's reported clock to time the command, so it includes any constant offset between Kodi's clock and what is on screen. That is what a scheduler needs, but it may differ between files, refresh rates and Kodi settings.
+- The commands were sent from the PC over the network (round trip about 17 ms); an add-on running inside Kodi would have less network delay but its own scheduling jitter.
+- If the delay really is steady at about 0.2 s, a fixed `lead_ms` of about 200 would cancel it, which would make ratio changes land within roughly 1 to 2 frames. Not shown yet.
+
 ### Not yet confirmed
 
 | Question | State |
@@ -39,6 +66,8 @@ A first pass over 1.33, 1.78 and 1.85 showed an unzoomed picture; the photos wer
 1. **Stop before you open.** Calling `Player.Open` while another file is playing fails with "error opening" about half the time (the old player is still being torn down). Call `Player.Stop`, wait a few seconds, then open. Files I had blamed (looped or longer files) played fine once this was done.
 2. **Do not pause to photograph.** A paused video shows Kodi's seek bar over the bottom of the picture. Photograph while playing.
 3. **Send floats.** See above.
+4. **Opens fail at random.** `Player.Open` over HTTP sometimes fails with "error opening" (Kodi sends HEAD, HEAD, one ranged GET, then drops the connection). It came in bursts of a few minutes, ended on its own, and hit files that opened fine minutes later (including identical copies). Stop-and-wait did not prevent it; retries eventually worked. Cause unknown. Test scripts must retry and verify that playback actually started.
+5. **Repeat mode persists.** A `Player.SetRepeat` to `one` from an earlier test stayed set, so the HDR10 file looped at the end. Reset repeat explicitly at the start of a run.
 
 ## Spike B, C, D
 
