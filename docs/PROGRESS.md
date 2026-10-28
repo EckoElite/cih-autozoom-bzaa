@@ -120,10 +120,16 @@ Kodi/serving notes: Kodi plays the original 100 s file from the PC's range serve
 
 **Decision matrix written and the route-choice GATE passed (2026-10-28):** route A (Kodi's internal player with the in-Kodi add-on), PM4K as the front end. See `docs/SPIKES.md`. Phase 2's optional on-device checks (Dolby Vision under zoom, a re-filmed full boundary video, mpv-android HDR, the Kodi intent test) are not done and are not required.
 
+**DEFERRED TO-DO (user, 2026-10-28): add the Shield shortcut to PM4K later.** Plan below; needs the user's go-ahead before any change on the Shield, then a short test. Steps when picked up: push `autoexec.py` (one line, `xbmc.executebuiltin('RunScript(script.plexmod)')`) to Kodi's userdata over adb; help the user add Kodi to the Projectivy home row; confirm it starts PM4K from a cold start; document removal (delete the file).
+
 **Shield shortcut to PM4K (user request, read-only findings 2026-10-28, nothing changed yet):** the home launcher on the Shield is Projectivy (not the stock Android TV home). Kodi has a launcher entry (`org.xbmc.kodi/.Splash`). PM4K 1.0.6 (`script.plexmod`) is installed as a script add-on with a service, and Kodi's favourites already hold a "PM4K for Plex" item. Kodi's userdata has no `autoexec.py`. PM4K has no path mapping configured. A direct Android shortcut into PM4K is not possible, because Kodi's intent handling only plays media; the route is a Shield home shortcut to Kodi plus a Kodi `autoexec.py` that starts PM4K at Kodi start-up.
 
 **Assumed, not verified:** HDR10 and Dolby Vision land on the same rows as SDR (see Phase 1); the 316 ms add-on lead carries over to other files, refresh rates and Kodi settings (one file, one capture).
 
+## Phase 3 status (design audit, 2026-10-28): written, waiting at the GATE
+
+`docs/AUDIT_1.md` traces R1 to R16, D1 to D8, L1 to L10, the section 10 failure modes and every assumption above. Result: no requirement missing from the design, no lesson repeated, **six Gaps** to close (missing Dolby Vision profile 5 / HDR10+ / interlaced samples; GHCR package visibility; the override button and PM4K's key handling; six missing tests; Kodi's vertical-shift units; a test pattern that stays readable in dim ramps) and **five decisions for the user** (G1 R2 acceptance at 1 frame, G2 defer subtitles, G3 samples, G4 Catching Fire path, G5 wrong zoom for about 0.3 s after a seek or at start). The section 5 math was re-derived independently (`tools/audit_math.py`) and agrees. Read-only findings from PM4K's source and the Shield: PM4K plays through `xbmc.Player`, sets no view mode, resumes by start-then-seek, and hands Kodi the Plex part URL (or a mapped path); the skin's `enableautozoom` is false.
+
 ## Next
 
-Finish the open Spike A items that need no new filming (Dolby Vision file, start-of-playback zoom), then Spikes B to D, then the decision matrix and the GATE. Nothing on the Shield changes without asking first.
+Answer the gate items in `docs/AUDIT_1.md`, then Phase 4 (analyzer service). Phase 5's first step is a read-only log of what PM4K passes to Kodi on a real title. The Shield shortcut to PM4K stays a deferred to-do (above).
