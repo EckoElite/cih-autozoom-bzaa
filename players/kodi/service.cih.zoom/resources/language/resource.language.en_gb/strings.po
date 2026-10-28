@@ -1,0 +1,28 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en_GB\n"
+
+msgctxt "#30000"
+msgid "General"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Zoom control"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Enable automatic zoom"
+msgstr ""
+
+msgctxt "#30003"
+msgid "Turn the per-title zoom timeline on or off."
+msgstr ""
+
+msgctxt "#30004"
+msgid "Lead time (ms)"
+msgstr ""
+
+msgctxt "#30005"
+msgid "How long before each picture change the zoom command is sent, to cancel Kodi's delay in applying it. Measured default 316 ms."
+msgstr ""
