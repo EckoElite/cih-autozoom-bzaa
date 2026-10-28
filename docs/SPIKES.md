@@ -50,6 +50,21 @@ Reading: a constant delay of about 0.2 s (about 5 frames at 23.976 fps) fits the
 - The commands were sent from the PC over the network (round trip about 17 ms); an add-on running inside Kodi would have less network delay but its own scheduling jitter.
 - If the delay really is steady at about 0.2 s, a fixed `lead_ms` of about 200 would cancel it, which would make ratio changes land within roughly 1 to 2 frames. Not shown yet.
 
+### Frame-accuracy test video (built 2026-10-28; not yet played)
+
+`tools/testpatterns/make_boundary_test.py HDR10 23.976` writes `out/boundary_hdr10_23976.mkv` (97.1 s, 2,328 frames, HEVC 10-bit PQ) and a `.timeline.json` with every cut and the zoom each state needs. SDR and 24 fps variants come from the same script (`SDR`, `24`); not built yet.
+
+| Part | Content |
+|---|---|
+| Lead-in | 48 frames at 2.39 |
+| 24 hard cuts | 72 frames per state, cycling 1.90, 2.39, 1.78, 2.39 (cuts at frames 48, 120, 192, ...) |
+| 3 ramp blocks | 48 frames hold at 2.39, then the matte opens 2.39 to 1.78 over 72 frames, then 48 frames hold at 1.78. Block 1 eased (smoothstep), block 2 linear, block 3 eased with a near-black picture |
+| Instrumentation | Burned-in frame counter ("F 00123") and a 14-bit binary code of the same number at the centre of the frame (the one point zoom never moves); the matte edges carry a 4 px white border and a tick every 24 px on the picture side; the picture has a line every 40 rows |
+
+Verified by decoding the video (2026-10-28): all 2,328 frames carry a binary code equal to their frame number, and the matte edge rows (top and bottom, measured at a fixed column) equal the plan on every frame, including all 3 x 72 ramp frames. A first build had the matte moving one frame early (the overlay filter's frame counter runs one ahead of the counter text); that was found by this check and fixed.
+
+How it will be used: send each cut's zoom `lead` seconds before the cut, varying the lead from cut to cut. In a slow-motion clip, the picture's displayed height says which state is on screen (correct zoom gives 1634 rows for 1.90 and 1.78 and 1606 for 2.39; a late zoom gives 2022 rows for 1.90, an early one gives 1298), and the code gives the frame number, so the number of wrong frames per cut can be counted and fitted against the lead.
+
 ### Not yet confirmed
 
 | Question | State |
