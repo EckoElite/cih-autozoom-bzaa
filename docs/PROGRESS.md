@@ -126,6 +126,20 @@ Kodi/serving notes: Kodi plays the original 100 s file from the PC's range serve
 
 **Assumed, not verified:** HDR10 and Dolby Vision land on the same rows as SDR (see Phase 1); the 316 ms add-on lead carries over to other files, refresh rates and Kodi settings (one file, one capture).
 
+## Phase 4 status (analyzer, 2026-10-28): slice 1 of 5 done
+
+Environment: project `.venv` (Python 3.12.10, user-approved) with fastapi 0.162.0, uvicorn 0.54.0, pydantic 2.14.1, pytest 9.2.0, ruff 0.17.3, httpx 0.28.1 (pinned in `analyzer/requirements*.txt`).
+
+| Slice | Content | State |
+|---|---|---|
+| 1 | `analyzer/`: ffprobe layer (video stream chosen by disposition, cover art ignored, display ratio from SAR, VFR and interlace flags, HDR classification incl. Dolby Vision profile, HDR10+ from frame side data), skip rules (ISO, non-video, 3D tags, MVC, extras and trailers, audio-only, broken), quick hash, timeline schema v1 with validation, CLI `python -m cih_analyzer <file>` | **Done.** 62 tests pass, ruff clean. Verified on generated videos (SDR, HDR10, HLG, cover art, non-square pixels, non-zero start time, interlaced, audio-only, corrupt, Unicode name) and on the real sample clips |
+| 2 | Coarse pass (keyframe `cropdetect` + `signalstats`), sample gating, aspect snapping, segmentation with hysteresis | Not started |
+| 3 | Boundary refinement, cut or ramp classification, ramp fitting | Not started |
+| 4 | Scheduler, SQLite, Plex mapping, path mapping, HTTP API, status page | Not started |
+| 5 | Dockerfile, GitHub Actions, Unraid template, install text | Not started |
+
+Findings in slice 1: the original *Carrie* file reads as `DV-P8` with HDR10+ and HDR10 extras (stream 0; the cover-art stream is ignored). A stream-copied clip loses the stream-level Dolby Vision record, so the analyzer reports `HDR10+` plus a `DV-RPU` extra from the frames; real files carry the record. Synthetic HDR fixtures need `setparams` as well as encoder flags, or the colour tags are lost.
+
 ## Phase 4 decisions taken (2026-10-28)
 
 | Question | Answer |
