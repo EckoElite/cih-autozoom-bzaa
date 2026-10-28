@@ -88,18 +88,21 @@ Carried forward (none blocks Phase 1):
 | Item | Reading | Confidence |
 |---|---|---|
 | Left and right edges | All left ticks L0 to L120 and right ticks R0 to R120 are on screen, and the 4 px white frame border is visible at both side edges. The image is not clipped sideways | Good (photos show it directly) |
-| Top edge | About row 256 to 263. The first full label at the screen's top edge is row 288; labels for rows 256 to 268 are partly cut by the edge | Rough: the photos are taken at an angle |
-| Bottom edge | About rows 1885 to 1900, from slivers of the 1888 to 1896 labels | Weak: Kodi's pause bar covers the bottom group in every chart photo |
+| Top edge | About row 258, plus or minus 4. The first full label at the screen's top edge is row 288; labels for rows 256 to 268 are partly cut by the edge | Fair: from the earlier photos only, taken at an angle; no clean close-up of the top yet |
+| Bottom edge | About row 1900 (last visible row), plus or minus 3. Replay with no pause bar (3 more photos): labels 1880 to 1892 whole, 1896 slightly clipped, 1900 to 1912 progressively clipped | Good |
+| Band | About rows 258 to 1900, so about 1643 rows tall, centred at about row 1079.5 (frame centre 1080). Implied ratio 3840 / 1643 = 2.337 if the full width is on screen | Fair |
 | 2.35 ratio frame (rows 263 to 1896) | The orange border is visible on all four screen edges | Good, but it only bounds the band to within a few px |
 | 2.39 frame (rows 277 to 1882) | Border visible on all four edges | Consistent with the above |
 | 2.00, 1.90, 1.85 frames | Top and bottom borders off screen, side borders on screen | Consistent |
 
-Not established: `band_top` and `band_bottom` to within a few px. Cause: the pause bar hides the bottom rows, and the photos are angled. `config/geometry.json` is not written yet.
+`config/geometry.json` is written as **provisional**. The design band stays at the nominal rows 263 to 1897 (height 1634), because that band is inside the measured band even at the worst ends of the tolerances, so fitting to it cannot spill past the screen. `tools/zoom_table.py` regenerates the section 5.3 table from it; the output matches the spec to within 0.0001 (the spec's own rounding). Vertical shift is 0 px for every ratio, since the band is centred.
+
+Still open for Phase 1: the same reading with the HDR10 file (to confirm HDR does not move the geometry), a straight-on close-up of the top edge, and the user's confirmation of the table. The measured edges came from photos taken at an angle; tolerances above are my estimates.
 
 Kodi/serving notes: Kodi plays the original 100 s file from the PC's range server, but files made by looping the 10 s chart with `-stream_loop` fail to open (Kodi sends HEAD, HEAD, a ranged GET, then drops the connection; cause not found). A paused video shows Kodi's seek bar over the bottom of the picture, so the chart must be photographed while playing, not paused.
 
 ## Next
 
-1. Get a clean chart reading: play `cal_sdr_2160p.mkv` (the chart is its first 30 s, no pause bar while playing) and have the user read or photograph the top and bottom edges straight-on and close up.
-2. Write `config/geometry.json` (`band_top`, `band_bottom`, measured ratio, centred or not) and a script that regenerates the section 5 table from it.
-3. Repeat the reading with the HDR10 file to confirm the geometry is the same in HDR.
+1. Repeat the reading with `cal_hdr10_2160p.mkv` (play, do not pause) to confirm the geometry is the same in HDR.
+2. A straight-on close-up of the top edge (optional, to tighten the top tolerance).
+3. User confirms `config/geometry.json` and the regenerated table, then Phase 1 exits.

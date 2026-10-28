@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "status": "provisional: measured by eye from phone photos (SDR chart, Kodi Normal view, zoom 1.0); HDR10 and a straight-on re-check still to do",
+  "output": {"width": 3840, "height": 2160},
+  "screen_ratio_nominal": 2.35,
+  "measured": {
+    "date": "2026-10-28",
+    "method": "cal_sdr_2160p.mkv row chart, 4 px row pitch, labels cut by the screen edge; two wide and four close-up photos",
+    "band_top": 258,
+    "band_top_tol": 4,
+    "band_bottom_exclusive": 1901,
+    "band_bottom_tol": 3,
+    "left_clipped_px": 0,
+    "right_clipped_px": 0,
+    "centre_row": 1079.5,
+    "centred": true,
+    "visible_height_rows": 1643,
+    "implied_ratio": 2.337,
+    "note": "Top: first full label at the edge is 288; 256-268 partly cut. Bottom: label 1892 whole, 1896 slightly clipped, 1900 to 1912 progressively clipped. L0-L120 and R0-R120 all visible, white frame border visible on both sides."
+  },
+  "design_band": {
+    "top": 263,
+    "bottom_exclusive": 1897,
+    "height": 1634,
+    "centre_row": 1080,
+    "rationale": "The nominal 2.35:1 band is inside the measured band even at the worst ends of the tolerances (258+4=262 <= 263; 1901-3=1898 >= 1897), so fitting to it cannot spill past the screen edge. The 2.35 ratio frame border (rows 263 to 1896) was seen on all four screen edges."
+  },
+  "scope_fill": false
+}
