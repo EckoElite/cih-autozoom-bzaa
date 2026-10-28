@@ -1,6 +1,49 @@
-﻿# SPIKES (Phase 2): in progress
+# SPIKES (Phase 2): decision matrix ready for the route-choice GATE
 
-Only Spike A has been started. Nothing below is a recommendation yet; the decision matrix is filled in at the end of Phase 2.
+Spike A (Kodi's internal player) was **measured** on the Shield. Spikes B, C and D were **read from source** (plus a few read-only `adb` queries); none has been run on the Shield. The matrix marks every cell as *measured* (M), *from source* (S) or *untested* (U). The evidence for each cell is in the sections below.
+
+## Decision matrix
+
+Routes: **A** = Kodi's internal player with the in-Kodi add-on. **B** = Plezy's built-in mpv (fork needed for timed zoom). **C** = Plezy hands the video to Kodi (Kodi's player and add-on do the zoom). **D** = mpv-android as Plezy's external player (Lua script).
+
+| Row | A: Kodi + add-on | B: Plezy mpv | C: Plezy to Kodi | D: mpv-android |
+|---|---|---|---|---|
+| HDR10 kept | **Yes (M, indirect)**: Kodi reports `hdr10` with the zoom changing; the projector shows no HDR overlay, and the user saw its HDR10 picture mode | Likely (S): the plane keeps the decoder's HDR dataspace and zoom does not touch the decoder (U) | As A | **Probably not (S)**: GL output, no HDR code (U) |
+| Dolby Vision kept | **U** | U (DV profile 5 takes a different path in the code) | As A: U | Probably not (S, U) |
+| Live zoom works | **Yes (M)** | Static only (S); timed zoom needs a fork | Yes (as A) | Plausible (S) via Lua; scripts and timeline delivery unproven (U) |
+| Geometry accurate | **Yes (M)** for SDR and HDR10: all seven ratio frames fit; residual about 4 rows from the band measurement | Unknown (U): view sizes are integers; **no vertical shift** (S) | As A | Expected (renderer transform) (U) |
+| Zoom latency and jitter, in frames | **M**: fixed delay 7.7 frames; with a lead of 316 ms the spread is 0.23 frames, **25 of 25 cuts within 1 frame, 23 of 25 exact** (PC-driven: 0.93 frames spread) | Not measured; relayout on the main thread, so I expect it not frame-locked (S) | As A | Not measured |
+| Visible glitch on change | None seen: no black flash in three frame-by-frame transitions at 60 fps; no skipped frame near 7 keyframes at 240 fps (M, limited) | Unknown; a resized SurfaceView may flash or drop frames (U, risk) | As A | Unknown (U) |
+| Ramp smoothness (per-frame updates) | **M, partly**: eased ramp tracks the commanded curve at 0 frames lag, mean error 0.0037 zoom, no reversals; first 54 frames of the linear ramp the same. Near-black ramp and the rest of the linear ramp unmeasured; one unexplained 1-frame excursion at frame 1860 | Unknown; per-frame relayouts are the main risk (U) | As A | Unknown (U) |
+| Timed changes feasible | **Yes (M)**, scheduled against Kodi's player clock | Only with a fork (S) | Yes (as A) | Yes in principle (S); script loading and timeline fetch unproven |
+| Seek, resume, chapter hooks | Add-on handles the Kodi callbacks; tested offline only, **not yet on the Shield** (U). After a seek the zoom lags about 7.7 frames (not measured) | Position stream and seek exist in Dart (S) | As A, but **resume position and Plex progress are lost**: Kodi ignores Plezy's position and returns no result (S) | Lua events (S); Plezy resume and progress sync **work** (S) |
+| Subtitle control (R13, P2) | Kodi subtitle position and skin settings; not tested | Subtitle surface stays full-size, so subtitles land outside the band unless changed (S) | As A | mpv subtitle options (U) |
+| Refresh-rate switching | Kodi's own setting; add-on does not touch it; not tested with zoom (U) | Frame-rate matching exists in the code (S, U) | As A | **Absent in the code (S)** |
+| Audio passthrough | Kodi's own; not tested with the add-on (U) | Setting exists (S, U) | As A | Only via mpv.conf (S, U) |
+| Fits the Plezy workflow | No: playback starts from Kodi's UI (PM4K is already installed there) | **Yes** | Partly: launch from Plezy, lose resume and Plex progress unless the add-on re-implements them | **Yes** (resume and sync work) |
+| Build effort | Prototype exists; production needs the analyzer lookup: low to medium | **High**: fork, Flutter and Android toolchain; a frame-locked version means rebuilding the native player | Medium: add-on grows a Plex client for resume and progress | Low to medium if scripts load, otherwise high |
+| Maintenance risk | **Low**: Kodi's add-on API is stable | **High**: 223 upstream commits in 30 days, in the files we would change | Low to medium | Low for a script, high for a custom build |
+
+## Recommendation
+
+**Route A: Kodi's internal player with the in-Kodi add-on.** It is the only route with measured evidence for the hard requirements: live timed zoom on the Shield, HDR10 shown while zoomed, 25 of 25 hard cuts within one frame, and ramps followed frame by frame. The other three routes are source readings, and each has a gap that the evidence points to as serious:
+
+- **B** needs a fork and its zoom is a view resize that I expect not to be frame-locked. It has high build and upkeep cost for a result I cannot yet predict.
+- **D** probably loses HDR10 and Dolby Vision, which is the project's first constraint. One short test (install mpv-android, set `video-zoom`, play the HDR10 video) would confirm or clear that, but I do not recommend spending it unless you want Plezy as the front end.
+- **C** is route A with Plezy as the launcher. It works, but costs resume and Plex progress.
+
+**How playback starts under route A** is your call at the gate, because it decides what the add-on must do:
+1. **PM4K** (`script.plexmod`, already in Kodi): plays Plex items in Kodi with Plex resume and progress built in. I have not read its source; the first Phase 5 step would be to check what URL it hands Kodi's player so the add-on can find the Plex part ID.
+2. **Plezy hand-off (route C):** keeps your Plezy workflow; the add-on would need to fetch the resume position from Plex and report progress back itself.
+
+**What you are accepting if you choose route A:**
+- **R2 accepted at "at most 1 frame", not the target of 0.** In 25 cuts, 2 landed one frame late and none early. The spec asks for your sign-off when the best reachable figure is above 0.
+- **A constant 7.7-frame delay** from command to picture. It is cancelled by sending each zoom early (`lead_ms` 316 by default), which works only because the timeline is known in advance. After a seek or at the start of playback, the right zoom takes about 0.3 s to appear; how many frames show the wrong zoom is unmeasured (Kodi also remembers the zoom per file).
+- **Open items to carry into the Phase 3 design audit:** Dolby Vision under zoom (untested); HDR at the projector is user-reported and indirect; the lead value comes from one file at one refresh rate; ramp coverage is partial (near-black ramp, rest of the linear ramp, the frame-1860 excursion); seek, chapter and resume handling is tested offline only; subtitles, refresh-rate switching and audio passthrough with the add-on are untested; the Kodi front end (PM4K or hand-off) is undecided.
+
+**Optional on-device checks that would firm this up** (each needs your go-ahead; none is required for the gate): a Dolby Vision file played under zoom on route A; re-filming the full boundary video with the recording kept running at least 30 s after the end; the mpv-android HDR check; the Kodi intent test with the PC test video.
+
+**GATE:** please choose the route (A, B, C or D) and, for route A, the front end (PM4K or Plezy hand-off).
 
 ## Spike A: Kodi internal player (Kodi 21.2 on the Shield, MediaCodec on)
 
