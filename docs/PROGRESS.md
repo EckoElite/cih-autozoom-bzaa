@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Current phase:** 0 (Environment and discovery) complete; Phase 1 (geometry calibration) next
+**Current phase:** 1 (Geometry calibration): videos built and verified; waiting for the user's on-screen readings
 **Last updated:** 2026-10-28
 
 Site-specific facts (LAN addresses, share and library paths, film titles, per-file probe results) are kept in `docs/LOCAL_FACTS.md`, which is gitignored so this public repo does not carry them. Secrets live only in `.env` (also gitignored).
@@ -34,6 +34,8 @@ Site-specific facts (LAN addresses, share and library paths, film titles, per-fi
 | Plex server reachable, token valid | `/identity` (v1.43.5.11079, claimed); `/library/sections` with the token returns 13 libraries; an invalid token gets 401 |
 | Library sizes | Plex API `totalSize` per section: Movies 2,344 titles, TV Shows 558 shows, plus smaller movie, show and music-video libraries (details in `LOCAL_FACTS.md`). Matches the spec's "2,000+ titles" |
 | Plex path to SMB path mapping works for the Movies library | For all 7 test films, the Plex file path mapped to the SMB share opens with `Test-Path` |
+| Phase 1 calibration videos built (SDR and HDR10) | `tools/testpatterns/make_calibration.py` writes `cal_sdr_2160p.mkv` and `cal_hdr10_2160p.mkv` to the gitignored `tools/testpatterns/out/`. ffprobe: HEVC, 3840x2160, 23.976 fps, 2,399 frames, 100.06 s. SDR is 8-bit BT.709 limited; HDR10 is 10-bit BT.2020 PQ with mastering display and MaxCLL SEI present. signalstats: HDR10 peak luma code about 591 to 604, consistent with 203 nit reference white in PQ limited range |
+| Calibration pattern content checked visually | Rendered stills inspected: numbered rows 200 to 328 and 1832 to 1960 every 4 px, L/R edge ticks every 10 px, cross, 4 px frame border, cyan marks at rows 263 and 1896; ratio-frame rectangles match the spec (2.35 gives y=263, h=1634; 2.39 gives h=1606 because the generator rounds to even, vs 1607 in the spec table) |
 | Stand-in samples generated and read back correctly | `tools/testpatterns/make_stand_in_samples.py`; ffprobe and cropdetect on the outputs |
 
 ## Open findings
@@ -83,4 +85,6 @@ Carried forward (none blocks Phase 1):
 
 ## Next
 
-Phase 1: build the calibration videos in `tools/testpatterns/` (SDR and HDR10), have the user play them on the Shield in Kodi (view mode Normal, zoom 1.0) and read the numbered rows at the screen's top and bottom edges.
+1. User at the projector: play `cal_sdr_2160p.mkv` on the Shield in Kodi (view mode Normal, zoom 1.0), report the row number on the screen's top edge and bottom edge, and the L/R tick at each side edge. Not yet done; nothing has been played on the Shield.
+2. Write `config/geometry.json` (`band_top`, `band_bottom`, measured ratio, centred or not) and a script that regenerates the section 5 table from it.
+3. Repeat the reading with the HDR10 file to confirm the geometry is the same in HDR.
