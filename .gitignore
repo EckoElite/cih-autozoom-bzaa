@@ -1,0 +1,26 @@
+# secrets
+.env
+*.env.local
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# generated test media and local samples (large; never commit)
+samples/
+*.mkv
+*.mp4
+*.m2ts
+*.iso
+tools/testpatterns/out/
+
+# editor / OS
+.vscode/
+.idea/
+Thumbs.db
+
+# site-specific facts (LAN addresses, share paths, titles); kept local, not published
+docs/LOCAL_FACTS.md
