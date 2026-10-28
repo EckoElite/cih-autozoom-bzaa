@@ -29,7 +29,7 @@ A first pass over 1.33, 1.78 and 1.85 showed an unzoomed picture; the photos wer
 |---|---|
 | Does the zoom apply to an HDR10 file? | Yes. All seven ratio frames show the same geometry as in SDR (contact sheet and frames from the video): top and bottom borders on the screen's top and bottom edges for 1.33 to 2.00, the 2.35 border on all four edges |
 | What does Kodi report? | `VideoPlayer.HdrType` = `hdr10`, resolution 4K, codec hevc, during every segment, with the zoom changing. This is Kodi's reading of the stream, not what the projector received |
-| Is HDR active at the projector? | **Not answered.** The user has not yet reported the projector's signal info |
+| Is HDR active at the projector? | **User-reported, indirect.** The projector shows no overlay or signal-info popup for HDR. The user reports that its picture settings page is set up for HDR10 while this file plays, and takes that to mean HDR10 is active. That shows the projector switched to its HDR10 picture mode; it does not show that HDR stayed on through each zoom change. Weak corroboration: the HDR10 video looks different from the SDR photos (brighter, bluer; camera exposure also differs) |
 | Black flash at a zoom change? | None seen in the three transitions examined frame by frame (19.7 s, 39.5 s, 49.9 s of the video). Each change shows one phone frame that blends the old and new picture (double-exposed text), then the new picture. A 60 fps phone cannot tell whether that blend is real or comes from the projector's processing or the camera |
 | Other glitches | Single-frame artifacts at about 20.5 s (a horizontal colour band) and a few in the first 1.5 s, not tied to a zoom change. Cause unknown |
 
