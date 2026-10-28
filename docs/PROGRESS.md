@@ -101,6 +101,25 @@ The user accepted the SDR numbers and the regenerated table on 2026-10-28 and ch
 
 Kodi/serving notes: Kodi plays the original 100 s file from the PC's range server, but files made by looping the 10 s chart with `-stream_loop` fail to open (Kodi sends HEAD, HEAD, a ranged GET, then drops the connection; cause not found). A paused video shows Kodi's seek bar over the bottom of the picture, so the chart must be photographed while playing, not paused.
 
+## Phase 2 status (in progress; details and numbers in `docs/SPIKES.md`)
+
+**Spike A (Kodi internal player), verified by running it:**
+
+| Item | State |
+|---|---|
+| Numeric zoom via `Player.SetViewMode` while HDR10 plays (MediaCodec on) | Works live, no black flash seen. The projector shows no HDR overlay, but the user confirmed its picture menu was in HDR10 mode |
+| Floats only; clamped to 0.5 to 2.0; Kodi remembers the view per file | Verified (a JSON `1` is ignored, `1.0` is accepted) |
+| Frame timing of a zoom change, commanded from the PC | Delay 7.6 frames, standard deviation 0.93 frames; frame-locked |
+| Same, commanded from an add-on inside Kodi (prototype installed on the Shield with the user's approval) | Delay 7.7 frames, standard deviation 0.23 frames; 23 of 25 cuts exact, 25 of 25 within 1 frame. R2 acceptance (at most 1 frame) met in this sample, target (0) not |
+| Per-frame ramp following | Eased ramp tracks the commanded curve at 0 frames lag with the add-on (mean error 0.0037 in zoom, about one pixel of measurement resolution) |
+| Playback stall near content frame 2000 | **Retracted 2026-10-28**: an artifact of the iPhone slow-motion clip (its last stretch is stored at 8 times speed). Keyframe probe found no skip near 7 keyframes |
+
+**Open in Spike A:** Dolby Vision with zoom; how many frames show the wrong zoom at the start of playback (per-file saved view); near-black ramp and the linear ramp's later part (re-film with the recording kept running at least 30 s after the video ends); the frame-4 hold at the start of playback (likely an HDMI mode switch, untested); a zoom change exactly at the keyframe at frame 2000; the one-frame excursion at frame 1860.
+
+**Not started:** Spike B (Plezy's mpv), Spike C (Plezy to Kodi hand-off), Spike D (mpv-android), the decision matrix, and the route-choice GATE.
+
+**Assumed, not verified:** HDR10 and Dolby Vision land on the same rows as SDR (see Phase 1); the 316 ms add-on lead carries over to other files, refresh rates and Kodi settings (one file, one capture).
+
 ## Next
 
-Phase 2 (player spikes, ends at the route-choice GATE). Order proposed: Spike A (Kodi internal player: `Player.SetViewMode` numeric zoom and vertical shift, live, with MediaCodec on), which also checks that zoom 0.7565 puts the 1.78 ratio frame's borders on the screen edges and whether HDR10 geometry matches SDR; then the frame-accuracy test video; then Spikes B to D (Plezy's mpv, Plezy to Kodi hand-off, mpv-android), which are mostly source reading until we choose to test them on the Shield.
+Finish the open Spike A items that need no new filming (Dolby Vision file, start-of-playback zoom), then Spikes B to D, then the decision matrix and the GATE. Nothing on the Shield changes without asking first.

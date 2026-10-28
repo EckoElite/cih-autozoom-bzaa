@@ -10,7 +10,7 @@ The geometry constants describe one capture (camera 1920x1080, tilted about 3.5 
 change them for a different set-up. Bit b (0 = MSB) of the 14-bit code has its centre at
 x = X0 + PITCH * b, y = Y0 + SLOPE * (x - X_REF), in plate coordinates.
 
-Usage: python decode_capture.py <plate.raw> <row.raw> <out.json>
+Usage: python decode_capture.py <plate.raw> <row.raw> <out.json> [X0 PITCH Y0 SLOPE]
 """
 import json
 import sys
@@ -46,6 +46,10 @@ def bit_centres():
 
 
 def main():
+    global X0, PITCH, Y0, SLOPE, X_REF
+    if len(sys.argv) > 7:   # optional geometry for a different framing: X0 PITCH Y0 SLOPE
+        X0, PITCH, Y0, SLOPE = (float(v) for v in sys.argv[4:8])
+        X_REF = X0
     plate = Path(sys.argv[1]).read_bytes()
     row = Path(sys.argv[2]).read_bytes()
     n = len(plate) // (PLATE_W * PLATE_H)

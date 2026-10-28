@@ -124,7 +124,7 @@ def build_events(timeline, ramp_lead, seed):
     rng.shuffle(leads)
     events = []
     for cut, lead in zip(cuts, leads):
-        events.append({"kind": "cut", "frame": cut["frame"], "from": cut["from"], "to": cut["to"],
+        events.append({"kind": "cut", "frame": cut["frame"], "from": cut.get("from"), "to": cut.get("to"),
                        "zoom": cut["zoom_to"], "lead": lead, "target": ftime(cut["frame"]) - lead})
     for ramp in timeline["ramps"]:
         for i, z in enumerate(ramp["zoom"]):
