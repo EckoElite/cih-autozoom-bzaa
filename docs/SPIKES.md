@@ -33,7 +33,31 @@ A first pass over 1.33, 1.78 and 1.85 showed an unzoomed picture; the photos wer
 | Black flash at a zoom change? | None seen in the three transitions examined frame by frame (19.7 s, 39.5 s, 49.9 s of the video). Each change shows one phone frame that blends the old and new picture (double-exposed text), then the new picture. A 60 fps phone cannot tell whether that blend is real or comes from the projector's processing or the camera |
 | Other glitches | Single-frame artifacts at about 20.5 s (a horizontal colour band) and a few in the first 1.5 s, not tied to a zoom change. Cause unknown |
 
-### Rough zoom latency from that video (4 transitions, **not** the Phase 2 acceptance test)
+### Frame-accuracy test, Spike A via JSON-RPC from the PC (2026-10-28; 240 fps capture of the boundary video)
+
+**Set-up.** `boundary_hdr10_23976.mkv` played from the PC over HTTP; `tools/spike_a/drive_boundary.py` sent each cut's new zoom `lead` seconds before the cut (leads 0.10 to 0.28 s in seven values, shuffled, four cuts each) and a new zoom for every frame during the ramps (lead 0.20 s). In a rehearsal and the filmed run all 244 commands were accepted, went out within about 2 ms of their scheduled time on Kodi's reported player clock, with a median round trip of about 3 ms (ramp commands 41.0 to 42.6 ms apart, target 41.7). The phone (1080p, 240 fps, steady, whole screen in frame) was analysed with `tools/spike_a/decode_capture.py`, `analyze_boundary.py` and `analyze_ramps.py`: the burned-in 14-bit code gives the content frame number (readable only while the zoom is 1.0, because the code plate shrinks with the zoom), and the width of the dark code plate gives the displayed zoom. The capture is consistent with itself: 10.008 camera frames per content frame against 240 / 23.976 = 10.010.
+
+**Hard cuts: 25 measurable of 28** (cut 1776 is 2.39 to 2.39, so no zoom change exists; cut 2112 and 2280 follow the near-black ramp and cannot be decoded; two early cuts have wider uncertainty).
+
+| Result | Value |
+|---|---|
+| Delay from command (timed on the player clock) to the picture changing, measured against the displayed content | mean **7.6 frames (0.316 s)**, standard deviation **0.93 frames (0.039 s)**, range 5.9 to 9.1 frames |
+| Depends on the lead I used? | No. Mean delay by lead 0.10 / 0.13 / 0.16 / 0.19 / 0.22 / 0.25 / 0.28 s: 0.329 / 0.290 / 0.323 / 0.340 / 0.330 / 0.304 / 0.311 s; slope of delay against lead +0.05 |
+| Depends on direction? | No. Zoom shrinking (to 1.90 or 1.78) 0.318 s; zoom growing (to 2.39) 0.314 s |
+| Frame-locked? | **Yes.** The zoom change lands on a content-frame boundary: its offset from the content change is within 0.1 frame of a whole number for the median cut (largest 0.45; measurement resolution about 0.1) |
+| What a single fixed lead would have achieved | With the lead set to the mean delay (about 0.316 s): the zoom lands on exactly the right frame on 9 of 25 cuts, within 1 frame on 23 of 25, worst case 2 frames. A lead of 0.31 to 0.33 s gives 8 to 11 exact and 21 to 23 within 1 frame |
+
+Against R2 (target 0 frames, acceptance at most 1 frame): **not met by this route as tested.** A fixed lead gets about 90% of cuts within a frame, but about 10% miss by 2 frames and fewer than half are exactly right. This supersedes the rough 0.2 s estimate below, which came from a cruder timing script and four transitions.
+
+Caveats: one capture; single file and refresh rate; the delay includes any constant offset between Kodi's reported clock and the displayed frame; the commands came from the PC over the network (an add-on inside Kodi may have less jitter, which is the next thing to test); the spread of about 1 frame may come from Kodi's player-clock readout, from its render pipeline, or from both, which this test cannot separate.
+
+**Ramps (per-frame commands).**
+- Eased ramp: the displayed zoom follows the commanded curve about **5.7 content frames after the frame each value was meant for** (per-frame lag mean 5.6, standard deviation 0.8, range 4 to 7). The commands were sent 4.8 frames early, so that is about 10 frames from command to picture, against 7.6 frames for the cuts. **The two do not agree and I do not know why**; candidates are back-to-back commands queueing inside Kodi, or an error in my width-to-zoom calibration (about 0.01 in zoom is about 2 frames on this ramp).
+- No upward reversals; about 15 of roughly 57 consecutive-frame steps showed no measurable change (threshold about a quarter pixel). Some of those are expected where the eased curve is flat, so this overstates stalls, but a lag that swings between 4 and 7 frames means uneven stepping, which R2 forbids.
+- Linear ramp: **not measurable.** The video froze and skipped during it: content frame 1997 stayed on screen for at least 0.17 s, then frame 2068 appeared (a jump of about 70 frames). This was seen in the camera frames. Cause unknown (the HTTP stream from the PC, Kodi, or the 216 per-frame commands). A smaller stall also occurred at the start of playback (frame 4 held for about 0.7 s, then a jump to about frame 23). Both are R4 concerns until explained.
+- Near-black ramp: **not measurable** (the code is unreadable on the dark picture).
+
+### Earlier rough latency from the first HDR10 video (4 transitions; superseded by the measurement above)
 
 Method: each zoom command was sent from the PC just before the next ratio frame's own picture change (the video file switches content at 10 s, 20 s, ...). In the phone video I found the frame where the zoom changes and the frame where the content changes, and compared. The command's lead over the content change comes from the logged player clock (read by polling every 100 ms).
 
