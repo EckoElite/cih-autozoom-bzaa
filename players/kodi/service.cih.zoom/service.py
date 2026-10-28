@@ -39,6 +39,15 @@ class ZoomPlayer(xbmc.Player):
         self.logfile = None
 
     # --- lifecycle ---------------------------------------------------------------------------------------------
+    def onPlayBackStarted(self):
+        # Kodi restores the view each file was last left at, so a title can start at the wrong zoom. Correct it
+        # as early as Kodi allows (here), before onAVStarted starts the scheduler.
+        if not ADDON.getSettingBool("enabled"):
+            return
+        self.timeline = self.load_timeline()
+        if self.timeline:
+            set_zoom(zoomcore.zoom_at_frame(self.timeline, 0))
+
     def onAVStarted(self):
         self.begin()
 
@@ -130,9 +139,10 @@ class ZoomPlayer(xbmc.Player):
             self.emit({"kind": "start", "frame": frame, "zoom": now_zoom, "lead_s": lead,
                        "offset_s": clock.offset()})
             events = zoomcore.build_events(self.timeline, lead, from_frame=frame + 1)
-            zoomcore.run_events(events, clock, set_zoom, self.stop_flag.is_set,
-                                log=lambda r: self.emit(dict(r, kind="event")))
-            self.emit({"kind": "done"})
+            sent = zoomcore.run_events(events, clock, set_zoom, self.stop_flag.is_set,
+                                       log=lambda r: self.emit(dict(r, kind="event")))
+            self.emit({"kind": "finished" if sent == len(events) else "interrupted", "sent": sent,
+                       "total": len(events)})
         except Exception as exc:
             log("worker failed: %r" % (exc,), xbmc.LOGERROR)
 

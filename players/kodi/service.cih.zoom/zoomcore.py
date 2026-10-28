@@ -110,6 +110,7 @@ def run_events(events, clock, send, should_stop, sleep=time.sleep, log=None, fra
     newest of the overdue ones, so a stall never replays a backlog.
     """
     pending = list(events)
+    sent_count = 0
     while pending and not should_stop():
         now = clock.player_now()
         overdue = [e for e in pending if e["target"] < now - frame_s]
@@ -134,7 +135,9 @@ def run_events(events, clock, send, should_stop, sleep=time.sleep, log=None, fra
         result = send(ev["zoom"])
         wall1 = clock.now()
         pending.pop(0)
+        sent_count += 1
         if log:
             log({"frame": ev["frame"], "zoom": ev["zoom"], "target": ev["target"], "sent_at": t_send,
                  "late_ms": (t_send - ev["target"]) * 1000.0, "call_ms": (wall1 - wall0) * 1000.0,
                  "ok": bool(result)})
+    return sent_count

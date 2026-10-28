@@ -158,6 +158,8 @@ def main():
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--pc-ip")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--play-only", action="store_true",
+                    help="only start playback (with retries); send no zoom commands, for tests of the in-Kodi add-on")
     args = ap.parse_args()
 
     stem = args.file[:-4] if args.file.endswith(".mkv") else args.file
@@ -181,6 +183,10 @@ def main():
     time.sleep(args.predelay)
     if not open_playback(kodi, url):
         print("giving up: playback never started")
+        return
+    if args.play_only:
+        kodi.call("Player.SetRepeat", {"playerid": 1, "repeat": "off"})
+        print("playback started; no zoom commands will be sent from this script")
         return
     kodi.call("Player.SetRepeat", {"playerid": 1, "repeat": "off"})
     kodi.set_zoom(1.0)

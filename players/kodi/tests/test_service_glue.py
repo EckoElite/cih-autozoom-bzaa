@@ -79,6 +79,12 @@ import service  # noqa: E402
 
 
 class GlueTests(unittest.TestCase):
+    def setUp(self):
+        RPC_CALLS.clear()
+        events = Path(PROFILE) / "events.jsonl"
+        if events.exists():
+            events.unlink()
+
     def test_play_through_applies_start_zoom_events_and_resets(self):
         timeline = {"fps": "24", "cuts": [{"frame": 24, "zoom_from": 1.0, "zoom_to": 0.8},
                                           {"frame": 36, "zoom_from": 0.8, "zoom_to": 1.0}], "ramps": []}
@@ -103,7 +109,20 @@ class GlueTests(unittest.TestCase):
         kinds = [r["kind"] for r in log]
         self.assertEqual(kinds[0], "start")
         self.assertEqual(kinds.count("event"), 2)
-        self.assertEqual(kinds[-1], "done")
+        self.assertEqual(kinds[-1], "finished")
+        self.assertEqual(log[-1]["sent"], log[-1]["total"])
+
+    def test_early_start_zoom_on_playback_started(self):
+        timeline = {"fps": "24", "cuts": [{"frame": 0, "zoom_from": 0.8, "zoom_to": 0.8},
+                                          {"frame": 240, "zoom_from": 0.8, "zoom_to": 1.0}], "ramps": []}
+        player = service.ZoomPlayer()
+        player.load_timeline = lambda: timeline
+        before = len(RPC_CALLS)
+        player.onPlayBackStarted()
+        new = RPC_CALLS[before:]
+        self.assertEqual(len(new), 1)
+        self.assertEqual(new[0][1]["params"]["viewmode"]["zoom"], 0.8)
+        self.assertIsInstance(new[0][1]["params"]["viewmode"]["zoom"], float)
 
 
 if __name__ == "__main__":
