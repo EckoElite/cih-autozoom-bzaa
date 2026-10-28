@@ -170,3 +170,31 @@ New facts gathered for this audit (all read-only; nothing on the Shield was chan
 ## 9. Verdict
 
 No requirement is missing from the design, and none of the ten lessons is repeated. Six Gaps need closing; five items need your decision (G1 to G5). **Phase 4 may start once you have answered the gate items.** The audit changes no measured result.
+
+## 10. Gate answers and follow-up findings (2026-10-28)
+
+| Item | Answer | Effect |
+|---|---|---|
+| G1 | **Accepted**: R2 at "at most 1 frame"; the target of 0 frames is not met by this route (2 of 25 cuts one frame late) | R2 stays a Risk with an accepted acceptance level; T6 and T8 still measure it |
+| G2 | **Accepted**: R13 (subtitles inside the band) is deferred | R13 is deferred with the user's agreement, as the spec allows. The user guide will name Kodi's subtitle alignment setting |
+| G3 | **Dolby Vision is not a concern for now** (user: the Shield does not support it; the Shield TV Pro hardware lists Dolby Vision, so the limit may be elsewhere in the chain, but the conclusion is the same). **HDR10+ sample supplied**: *Carrie* (2026) S01E06 | R3 narrows to HDR10, HDR10+ and SDR; Dolby Vision and profile 5 are out of scope until the user says otherwise. Interlaced remains untested and accepted as such |
+| G4 | **Confirmed**: *Catching Fire* is one of the seven test films, path already in the private notes; ownership confirmed by the user | T8 can proceed in Phase 6 |
+| G5 | **Accepted**: the old zoom may show for about 0.3 s after a seek or at the start | R5 stays a Risk with an accepted level; Phase 5 still measures it |
+
+**The *Carrie* sample** (private path kept in `docs/LOCAL_FACTS.md`; a 90 s stream-copy clip is in the gitignored `samples/`): HEVC Main 10, **3840x1920 (2.00:1) native container**, 24 fps, PQ, BT.2020, **HDR10+ (SMPTE 2094-40) and Dolby Vision profile 8.1 (single layer, HDR10-compatible)**, MP4, 59 minutes, `start_time` 0. Checked read-only over SMB:
+
+- **Crop detection works on it.** On the clip's keyframes, `cropdetect` at limits 0.02, 0.05 and 0.1 gives `crop=3840:1920:0:0` on all 44 samples, so no baked-in mattes. At limit 0.2 it produces false crops on dark frames (for example 2884x1392), which is concrete evidence for tuning the limit per transfer (spec Phase 4 step 2). Brightness of the keyframes (10-bit YAVG, black = 64) ranged 205 to 375.
+- **The zoom for this file is 0.8510** (a 2.00:1 active picture), and the R6 fallback (contain by the container's display ratio) gives the same answer, because the container itself is 2:1. It is therefore a native-ratio-container sample for the "native 2.39 encode" slot, and a test of the fallback.
+- **Not tested on the Shield.** Whether Kodi plays profile 8.1 as HDR10 on this chain, and whether HDR10+ metadata passes, is untested; the clip is ready for a playback test.
+
+**New design points from this sample (add to section 7):**
+
+| ID | Change | Why |
+|---|---|---|
+| DD14 | The analyzer must choose the video stream by disposition and ignore attached pictures | This file has a JPEG cover-art stream (index 30) next to the real video (index 0); *Avatar*'s video is index 1 |
+| DD15 | Keep `cropdetect` limits per transfer, expressed as fractions, with 0.02 to 0.1 as the starting range for PQ | Stable at 0.1, false crops at 0.2 on this file |
+| DD16 | Take the display ratio from the container's display aspect ratio (SAR applied) for the fallback | The 2:1 container gives the right answer with no analysis |
+
+**R8 after the gate:** the Gap narrows. An HDR10+ sample exists; profile 5 is out of scope; interlaced is accepted as untested. The remaining R8 work is the planned synthetic fixtures.
+
+**Verdict after the gate:** all five gate items are answered. Six Gaps remain open (section 8, items 1 to 6, with item 1 now reduced to "interlaced and profile 5 are accepted as untested"). **Phase 4 may start.**

@@ -126,7 +126,11 @@ Kodi/serving notes: Kodi plays the original 100 s file from the PC's range serve
 
 **Assumed, not verified:** HDR10 and Dolby Vision land on the same rows as SDR (see Phase 1); the 316 ms add-on lead carries over to other files, refresh rates and Kodi settings (one file, one capture).
 
-## Phase 3 status (design audit, 2026-10-28): written, waiting at the GATE
+## Phase 3 GATE passed (2026-10-28)
+
+The user answered all five items: G1 accept R2 at 1 frame, G2 defer subtitles (R13), G3 Dolby Vision not a concern (HDR10+ sample: *Carrie* S01E06, checked: crop detection works, no mattes, 2.00:1 native container, zoom 0.8510), G4 *Catching Fire* confirmed, G5 accept a short wrong-zoom time after seek or start. Details in `docs/AUDIT_1.md` section 10. Phase 4 questions are the next thing to ask.
+
+## Phase 3 status (design audit, 2026-10-28): written
 
 `docs/AUDIT_1.md` traces R1 to R16, D1 to D8, L1 to L10, the section 10 failure modes and every assumption above. Result: no requirement missing from the design, no lesson repeated, **six Gaps** to close (missing Dolby Vision profile 5 / HDR10+ / interlaced samples; GHCR package visibility; the override button and PM4K's key handling; six missing tests; Kodi's vertical-shift units; a test pattern that stays readable in dim ramps) and **five decisions for the user** (G1 R2 acceptance at 1 frame, G2 defer subtitles, G3 samples, G4 Catching Fire path, G5 wrong zoom for about 0.3 s after a seek or at start). The section 5 math was re-derived independently (`tools/audit_math.py`) and agrees. Read-only findings from PM4K's source and the Shield: PM4K plays through `xbmc.Player`, sets no view mode, resumes by start-then-seek, and hands Kodi the Plex part URL (or a mapped path); the skin's `enableautozoom` is false.
 
