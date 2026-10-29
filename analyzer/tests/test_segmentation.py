@@ -138,6 +138,57 @@ def test_a_ramp_in_the_opposite_direction():
     assert len(result.boundaries[0].intermediates) == 3
 
 
+def box(t, x, y, w, h, yavg=80.0):
+    return Sample(t, x, y, w, h, yavg)
+
+
+def test_the_same_ratio_at_two_sizes_is_two_segments():
+    # a 16:9 picture filling the frame, then the same 16:9 inset with bars on all four sides
+    full = [box(float(t), 0, 0, 3840, 2160) for t in range(10)]
+    inset = [box(float(t), 480, 270, 2880, 1620) for t in range(10, 20)]
+    result = segment_samples(full + inset, make_info(duration=20.0))
+    assert [(s.rect, s.preset) for s in result.segments] == [
+        ((0, 0, 3840, 2160), True),
+        ((480, 270, 2880, 1620), True),
+    ]
+    assert result.segments[0].aspect == result.segments[1].aspect == R_1_78
+
+
+def test_measurement_jitter_within_a_percent_is_still_one_segment():
+    jittered = [box(float(t), 0, 270 + (t % 3) * 4, 3840, 1620 - (t % 3) * 8) for t in range(20)]
+    assert len(segment_samples(jittered, make_info(duration=20.0)).segments) == 1
+
+
+def test_a_window_that_grows_at_a_constant_ratio_is_a_ramp_between_two_sizes():
+    small = [box(float(t), 480, 270, 2880, 1620) for t in range(8)]
+    growing = [
+        box(8.0 + k, 480 - 60 * (k + 1), 270 - 33 * (k + 1), 2880 + 120 * (k + 1), 1620 + 66 * (k + 1))
+        for k in range(7)
+    ]
+    full = [box(float(t), 0, 0, 3840, 2160) for t in range(15, 25)]
+    result = segment_samples(small + growing + full, make_info(duration=25.0))
+    assert [s.rect for s in result.segments] == [(480, 270, 2880, 1620), (0, 0, 3840, 2160)]
+    assert result.boundaries[0].ramp_candidate and len(result.boundaries[0].intermediates) >= 3
+
+
+def test_a_jump_to_a_small_window_that_eases_back_to_the_same_picture_is_a_ramp_candidate():
+    before = [
+        box(float(t), 0, 0, 3840, 2160) for t in range(2)
+    ]  # a short opening, too short to be a stable run
+    eased = [box(2.0 + k, 600 - 75 * k, 340 - 42 * k, 2640 + 150 * k, 1480 + 84 * k) for k in range(8)]
+    after = [box(float(t), 0, 0, 3840, 2160) for t in range(10, 22)]
+    result = segment_samples(before + eased + after, make_info(duration=22.0))
+    assert len(result.segments) == 2 and result.segments[0].rect == result.segments[1].rect
+    assert result.boundaries[0].ramp_candidate and "ramp_candidate" in result.flags
+
+
+def test_unrelated_short_states_are_not_a_ramp():
+    # random crops of a dark scene between two identical stable runs: not one-way, so flicker, not a ramp
+    junk = [box(10.0, 300, 100, 3000, 1700), box(11.0, 100, 400, 3500, 1200), box(12.0, 500, 50, 2800, 1900)]
+    result = segment_samples(run(0, 10, R_1_78) + junk + run(13, 23, R_1_78), make_info(duration=23.0))
+    assert len(result.segments) == 1 and result.boundaries == ()
+
+
 def test_sparse_keyframes_do_not_make_every_segment_flicker():
     # one keyframe every 8 s: one sample per run is all there is, and must still be enough
     samples = [

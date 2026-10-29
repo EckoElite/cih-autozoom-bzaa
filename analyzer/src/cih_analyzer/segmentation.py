@@ -33,6 +33,9 @@ SNAP_TOLERANCE = 0.015
 RAW_SAME_TOLERANCE = 0.01
 MIN_PICTURE_FRACTION = 0.04  # a crop smaller than this share of the frame area is noise, not a picture
 MIN_PICTURE_PIXELS = 64
+RECT_TOLERANCE = 0.01  # fraction of the frame
+MIN_RECT_TOLERANCE_PX = 8
+MIN_EXCURSION_STATES = 3
 VERIFY_CONFIDENCE = 0.9
 VERIFY_SHORT_SEGMENT_S = 15.0
 
@@ -109,11 +112,43 @@ def unusable_reason(sample: Sample, info: VideoInfo, params: SegmentationParams)
     return None
 
 
+Rect = tuple[int, int, int, int]
+
+
+def rect_tolerance(info: VideoInfo) -> tuple[float, float]:
+    """How far apart (horizontally, vertically) two picture rectangles' edges may be and still be the same state:
+    1% of the frame, at least 8 px. The coarse pass is good to about a pixel of its 960-wide frame."""
+    return max(MIN_RECT_TOLERANCE_PX, RECT_TOLERANCE * info.width), max(
+        MIN_RECT_TOLERANCE_PX, RECT_TOLERANCE * info.height
+    )
+
+
+def _edges(rect: Rect) -> tuple[int, int, int, int]:
+    x, y, w, h = rect
+    return x, y, x + w, y + h
+
+
+def rects_close(a: Rect, b: Rect, tol: tuple[float, float]) -> bool:
+    ax0, ay0, ax1, ay1 = _edges(a)
+    bx0, by0, bx1, by1 = _edges(b)
+    return (
+        abs(ax0 - bx0) <= tol[0]
+        and abs(ax1 - bx1) <= tol[0]
+        and abs(ay0 - by0) <= tol[1]
+        and abs(ay1 - by1) <= tol[1]
+    )
+
+
 @dataclass
 class _Run:
+    """Consecutive samples in the same state: the same label and a picture rectangle within tolerance of the
+    first sample's, so one ratio at two different sizes (a window that grows to full frame) is two states."""
+
     label: float
     preset: bool
     samples: list[tuple[Sample, float]]  # (sample, its own snapped label)
+    rect: Rect
+    tol: tuple[float, float]
 
     @property
     def first(self) -> float:
@@ -158,16 +193,21 @@ def _same(a: float, b: float, a_preset: bool, b_preset: bool) -> bool:
 
 
 def _same_run(a: _Run, b: _Run) -> bool:
-    return _same(a.label, b.label, a.preset, b.preset)
+    return _same(a.label, b.label, a.preset, b.preset) and rects_close(a.rect, b.rect, a.tol)
 
 
-def _build_runs(labelled: list[tuple[Sample, float, bool]]) -> list[_Run]:
+def _build_runs(labelled: list[tuple[Sample, float, bool]], tol: tuple[float, float]) -> list[_Run]:
     runs: list[_Run] = []
     for sample, label, preset in labelled:
-        if runs and _same(runs[-1].label, label, runs[-1].preset, preset):
+        rect = (sample.x, sample.y, sample.w, sample.h)
+        if (
+            runs
+            and _same(runs[-1].label, label, runs[-1].preset, preset)
+            and rects_close(runs[-1].rect, rect, tol)
+        ):
             runs[-1].samples.append((sample, label))
         else:
-            runs.append(_Run(label, preset, [(sample, label)]))
+            runs.append(_Run(label, preset, [(sample, label)], rect, tol))
     return runs
 
 
@@ -190,12 +230,44 @@ def _monotone_between(left: float, chain: list[float], right: float) -> bool:
     return all(a <= b for a, b in zip(ordered, ordered[1:], strict=False))
 
 
+def _rect_ramp(left: _Run, chain: list[_Run], right: _Run) -> bool:
+    """True if the chain's picture rectangles follow a gradual change, judged on the rectangles themselves.
+
+    Either (1) every edge moves one way from `left` through the chain to `right`, and the two ends really differ;
+    or (2) the chain has at least three states, every edge of which moves one way on to `right` (the picture jumped
+    to something else, perhaps a small window, then eased into `right`, which may even equal `left`).
+    """
+    tol = left.tol
+
+    def one_way(seq: list[tuple[int, int, int, int]]) -> bool:
+        for e in range(4):
+            t = tol[e % 2]  # edges are x0, y0, x1, y1
+            vals = [s[e] for s in seq]
+            rising = all(b >= a - t for a, b in zip(vals, vals[1:], strict=False))
+            falling = all(b <= a + t for a, b in zip(vals, vals[1:], strict=False))
+            if not (rising or falling):
+                return False
+        return True
+
+    def differ(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
+        return any(abs(a[e] - b[e]) > 2 * tol[e % 2] for e in range(4))
+
+    start, end = _edges(left.rect), _edges(right.rect)
+    mid = [_edges(r.rect) for r in chain]
+    if differ(start, end) and one_way([start, *mid, end]):
+        return True
+    return len(chain) >= MIN_EXCURSION_STATES and differ(mid[0], end) and one_way([*mid, end])
+
+
 def _extract_ramps(runs: list[_Run], ctx: _Context) -> tuple[list[_Run], dict[int, list[Sample]]]:
-    """Remove chains of short runs that sit strictly between two different stable runs, in order.
+    """Remove chains of short runs that are a gradual change between two stable runs.
 
     A ramp's in-between states may coincide with standard ratios (2.20, 2.00, 1.85 between 2.39 and 1.78), so every
-    short run is a candidate; the strictly-between-and-in-order test decides. Returns the remaining runs and, keyed
-    by the index (in the remaining list) of the run *before* each removed chain, the chain's samples.
+    short run is a candidate. Two tests decide: the labels lie strictly between the two ratios, in order; or the
+    picture rectangles follow a one-way change (`_rect_ramp`), which also covers a ramp that returns to the ratio it
+    started from, and one at a constant ratio whose size changes. The first run of the file may serve as the left end
+    even when it is short (an opening that cuts to a small window). Returns the remaining runs and, keyed by the
+    index (in the remaining list) of the run *before* each removed chain, the chain's samples.
     """
     durations = ctx.durations(runs, True, True, ctx.end)
     short = [ctx.is_short(r, d) for r, d in zip(runs, durations, strict=True)]
@@ -209,13 +281,17 @@ def _extract_ramps(runs: list[_Run], ctx: _Context) -> tuple[list[_Run], dict[in
         j = i
         while j + 1 < len(runs) and short[j + 1]:
             j += 1
-        if i > 0 and j + 1 < len(runs):
-            left, right = runs[i - 1], runs[j + 1]
-            chain = [r.label for r in runs[i : j + 1]]
-            if not _same_run(left, right) and _monotone_between(left.label, chain, right.label):
-                for k in range(i, j + 1):
+        first = i + 1 if i == 0 and j > i else i  # a short run that opens the file anchors a chain after it
+        if first > 0 and j + 1 < len(runs) and first <= j:
+            left, right = runs[first - 1], runs[j + 1]
+            states = runs[first : j + 1]
+            chain = [r.label for r in states]
+            if (
+                not _same_run(left, right) and _monotone_between(left.label, chain, right.label)
+            ) or _rect_ramp(left, states, right):
+                for k in range(first, j + 1):
                     keep[k] = False
-                found[i - 1] = [s for r in runs[i : j + 1] for s, _ in r.samples]
+                found[first - 1] = [s for r in states for s, _ in r.samples]
         i = j + 1
     new_index = {old: new for new, old in enumerate(k for k in range(len(runs)) if keep[k])}
     return [r for r, k in zip(runs, keep, strict=True) if k], {
@@ -310,7 +386,7 @@ def segment_samples(
     min_samples = params.min_samples if gap <= params.min_segment_s / 2 else 1
     ctx = _Context(params, gap, min_samples, end)
 
-    runs, chains = _extract_ramps(_build_runs(labelled), ctx)
+    runs, chains = _extract_ramps(_build_runs(labelled, rect_tolerance(info)), ctx)
     runs_with_chains = _merge_with_ramps(runs, chains, ctx)
 
     segments: list[CoarseSegment] = []

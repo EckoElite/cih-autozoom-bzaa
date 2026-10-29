@@ -22,7 +22,14 @@ from typing import Literal
 from .frames import Edges, ScanFrame, matte_levels, matte_threshold, scan_edges, threshold_from
 from .probe import VideoInfo
 from .ramps import FitFrame, RampParams, analyze_transition, reference_edges
-from .segmentation import BoundaryWindow, CoarseResult, CoarseSegment, snap_aspect
+from .segmentation import (
+    BoundaryWindow,
+    CoarseResult,
+    CoarseSegment,
+    rect_tolerance,
+    rects_close,
+    snap_aspect,
+)
 
 Rect = tuple[int, int, int, int]
 EPSILON = 1e-6
@@ -307,8 +314,9 @@ def refine_boundary(
     )
 
 
-def _same_label(a: CoarseSegment, b: CoarseSegment) -> bool:
-    if a.preset != b.preset:
+def _same_label(a: CoarseSegment, b: CoarseSegment, tol: tuple[float, float]) -> bool:
+    """Same ratio and the same picture size (a window that grows to full frame keeps its ratio, not its size)."""
+    if a.preset != b.preset or not rects_close(a.rect, b.rect, tol):
         return False
     return a.aspect == b.aspect if a.preset else abs(a.aspect - b.aspect) / max(a.aspect, b.aspect) <= 0.01
 
@@ -324,11 +332,18 @@ def _join(
 
 
 def _merge_refuted(
-    segments: list[CoarseSegment], boundaries: list[BoundaryWindow], i: int, into_left: bool
+    segments: list[CoarseSegment],
+    boundaries: list[BoundaryWindow],
+    i: int,
+    into_left: bool,
+    tol: tuple[float, float],
 ) -> None:
     """Fold a refuted segment into the neighbour its probes matched (both, when the neighbours share a ratio)."""
     has_left, has_right = i > 0, i + 1 < len(segments)
-    if has_left and has_right and _same_label(segments[i - 1], segments[i + 1]):
+    across_ramp = (
+        has_left and has_right and (boundaries[i - 1].ramp_candidate or boundaries[i].ramp_candidate)
+    )
+    if has_left and has_right and not across_ramp and _same_label(segments[i - 1], segments[i + 1], tol):
         _join(segments, boundaries, i - 1, "left")
         _join(segments, boundaries, i - 1, "left")
     elif has_left and (into_left or not has_right):
@@ -337,12 +352,15 @@ def _merge_refuted(
         _join(segments, boundaries, i, "right")
 
 
-def _merge_equal(segments: list[CoarseSegment], boundaries: list[BoundaryWindow]) -> bool:
-    """Join neighbours that carry the same label (a correction can make two segments equal)."""
+def _merge_equal(
+    segments: list[CoarseSegment], boundaries: list[BoundaryWindow], tol: tuple[float, float]
+) -> bool:
+    """Join neighbours that carry the same label (a correction can make two segments equal), except across a ramp
+    candidate: a window that returns to the picture it started from is two segments with a ramp between."""
     merged = False
     i = 0
     while i + 1 < len(segments):
-        if _same_label(segments[i], segments[i + 1]):
+        if not boundaries[i].ramp_candidate and _same_label(segments[i], segments[i + 1], tol):
             _join(segments, boundaries, i, "left")
             merged = True
         else:
@@ -363,6 +381,7 @@ def refine(
     dropped: list[tuple[float, float, float]] = []
     corrected: list[float] = []  # start times of segments whose rectangle the probes changed
     threshold = _file_threshold(path, info, segments)
+    size_tol = rect_tolerance(info)
     cache: dict[tuple, SegmentCheck] = {}
 
     def check(i: int) -> SegmentCheck:
@@ -383,7 +402,7 @@ def refine(
             result = check(i)
             if result.verdict == "refuted" and len(segments) > 1:
                 dropped.append((seg.start, seg.end, seg.aspect))
-                _merge_refuted(segments, boundaries, i, result.into_left)
+                _merge_refuted(segments, boundaries, i, result.into_left, size_tol)
                 acted = True
             elif result.verdict == "corrected":
                 label, snapped = snap_aspect(_display_aspect(result.rect, info))
@@ -394,7 +413,7 @@ def refine(
                 acted = True
             if acted:
                 break
-        acted = _merge_equal(segments, boundaries) or acted
+        acted = _merge_equal(segments, boundaries, size_tol) or acted
         if not acted:
             break
 

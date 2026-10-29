@@ -232,10 +232,8 @@ class TestRamps:
         lefts = [f.fitted.left for f in boundary.ramp]
         assert all(a > b for a, b in zip(lefts, lefts[1:], strict=False))
 
-    @pytest.mark.xfail(
-        strict=True, reason="known gap (DD21): the coarse pass labels by ratio and sees no change here"
-    )
     def test_a_window_that_grows_back_to_the_same_ratio_is_found(self, tmp_path):
+        # the picture before and after is identical (1.85 full frame), so a ratio label alone sees no change (DD21)
         full = rect_for_ratio(1.85, W, H)
         inset = (160, 80, 320, 200)
 
@@ -246,8 +244,14 @@ class TestRamps:
 
         segs = [Seg(2, full, level=110), Seg(10, growing, level=150), Seg(8, full, level=110)]
         path = make_video(tmp_path / "same.mp4", segs, keyint=12)
-        _, _, result = analyse(path, scan={"min_interval_s": 0.5})
-        assert [b.kind for b in result.boundaries] == ["ramp"]
+        _, coarse, result = analyse(path, scan={"min_interval_s": 0.5})
+        assert coarse.boundaries[0].ramp_candidate
+        (boundary,) = result.boundaries
+        assert boundary.kind == "ramp" and "ramp_after_cut" in boundary.flags
+        assert boundary.t_start == pytest.approx(2.0, abs=0.04) and abs(boundary.frame - 300) <= 3
+        assert [s.rect for s in result.segments] == [full, full]
+        assert result.segments[0].end == pytest.approx(2.0, abs=0.04)
+        assert result.flags.count("ramp") == 1
 
     def test_edge_threshold_ignores_a_rectangle_that_contains_picture(self, tmp_path):
         from cih_analyzer.frames import matte_threshold
