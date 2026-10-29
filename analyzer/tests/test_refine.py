@@ -279,6 +279,28 @@ class TestRamps:
         assert matte_threshold(path, info, [(2.0, small), (2.5, SCOPE)]) == good  # the cleanest sample wins
 
     def test_ramp_tracks_a_matte_that_also_moves_at_the_sides(self, tmp_path):
+        # a window that grows in both directions, from a small 4:3 picture to the full frame (a change in width
+        # alone would not change the zoom, so it is not worth a ramp)
+        small = (160, 60, 320, 240)
+
+        def growing(i, frames=60):
+            return tuple(
+                2 * round((a + (b - a) * i / (frames - 1)) / 2)
+                for a, b in zip(small, (0, 0, W, H), strict=True)
+            )
+
+        path = make_video(
+            tmp_path / "side.mp4", [Seg(6, small), Seg(2.4, growing), Seg(6, (0, 0, W, H))], keyint=12
+        )
+        _, _, result = analyse(path, scan={"min_interval_s": 0.4})
+        (boundary,) = result.boundaries
+        assert boundary.kind == "ramp" and len(boundary.ramp) >= 55
+        lefts = [f.fitted.left for f in boundary.ramp]
+        tops = [f.fitted.top for f in boundary.ramp]
+        assert all(a > b for a, b in zip(lefts, lefts[1:], strict=False)) and lefts[0] > 0
+        assert all(a > b for a, b in zip(tops, tops[1:], strict=False)) and tops[0] > 0
+
+    def test_a_ramp_that_only_changes_the_width_is_not_kept(self, tmp_path):
         four_three = rect_for_ratio(4 / 3, W, H)
 
         def pillar_opening(i, frames=60):
@@ -291,10 +313,9 @@ class TestRamps:
             keyint=12,
         )
         _, _, result = analyse(path, scan={"min_interval_s": 0.4})
-        (boundary,) = result.boundaries
-        assert boundary.kind == "ramp" and len(boundary.ramp) >= 55
-        lefts = [f.fitted.left for f in boundary.ramp]
-        assert all(a > b for a, b in zip(lefts, lefts[1:], strict=False)) and lefts[0] > 0
+        assert (
+            result.boundaries == () and len(result.segments) == 1
+        )  # 4:3 and 16:9 zoom the same in a 16:9 frame
 
 
 @NEEDS_FFMPEG

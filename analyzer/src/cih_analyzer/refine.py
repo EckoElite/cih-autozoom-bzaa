@@ -536,6 +536,22 @@ def _trusted(b: RefinedBoundary) -> bool:
     return b.confidence >= TRUST_CONFIDENCE and "unresolved" not in b.flags
 
 
+def _ramp_not_worth_keeping(
+    b: RefinedBoundary, before: RefinedSegment, after: RefinedSegment, info: VideoInfo
+) -> bool:
+    """A ramp has to land where the next segment starts (a merge elsewhere can move that), has to start where the
+    previous one ended unless it began with a cut, and has to move the picture by something worth following."""
+    tol = rect_tolerance(info)
+    if not rects_close(b.ramp[-1].fitted.rect, after.rect, (2 * tol[0], 2 * tol[1])):
+        return True
+    if "ramp_after_cut" not in b.flags and not rects_close(
+        b.ramp[0].fitted.rect, before.rect, (4 * tol[0], 4 * tol[1])
+    ):
+        return True
+    ends = (_zoom(before.rect, info), _zoom(after.rect, info))
+    return all(abs(_zoom(f.fitted.rect, info) / e - 1) < EQUIVALENT_ZOOM for f in b.ramp for e in ends)
+
+
 def _merge_pair(a: RefinedSegment, b: RefinedSegment, info: VideoInfo) -> RefinedSegment:
     """The two segments as one, over the smallest rectangle that holds both: a rectangle that is too small makes
     the picture too big for the screen, one that is too large only leaves bars."""
@@ -582,6 +598,8 @@ def settle(
             and abs(_zoom(segs[i].rect, info) / _zoom(segs[i + 1].rect, info) - 1) < EQUIVALENT_ZOOM
         ):
             return True  # a change that would move the picture by a few percent is not worth a zoom change
+        if b.kind == "ramp" and b.ramp and _ramp_not_worth_keeping(b, segs[i], segs[i + 1], info):
+            return True
         if i == 0 and b.t_start <= segs[0].start + EPSILON:
             return True
         if i > 0 and b.t_start <= bounds[i - 1].t + EPSILON:

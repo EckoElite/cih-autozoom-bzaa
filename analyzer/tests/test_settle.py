@@ -1,5 +1,7 @@
 """`settle`: a change that could not be pinned down is never written into the timeline."""
 
+from cih_analyzer.frames import Edges
+from cih_analyzer.ramps import FitFrame
 from cih_analyzer.refine import RefinedBoundary, RefinedSegment, settle
 
 from .helpers import make_info
@@ -106,6 +108,40 @@ def test_a_short_dip_to_a_smaller_picture_and_back_is_a_fade_not_a_ramp():
     segments = [seg(0, 48.8, WIDE), seg(49.7, 100, WIDE)]
     out_segments, out_boundaries, merges = settle(segments, [ramp(48.8, 49.7)], INFO)
     assert merges == 1 and out_boundaries == [] and [(s.start, s.end) for s in out_segments] == [(0, 100)]
+
+
+def fit(rect, k=0):
+    x, y, w, h = rect
+    return FitFrame(100 + k, 4.0 + k / 24, Edges(top=y, bottom=y + h, left=x, right=x + w), None, True)
+
+
+def opening_ramp(frames, *, t_start=10.0, t=14.0, flags=()):
+    return RefinedBoundary("ramp", t, round(t * 24), t_start, None, None, None, tuple(frames), 0.9, flags)
+
+
+def test_a_ramp_that_moves_the_picture_a_real_amount_between_its_two_segments_is_kept():
+    mid = (0, 138, 3840, 1884)
+    frames = [fit((0, 276 - 20 * k, 3840, 1608 + 40 * k), k) for k in range(5)] + [fit(WIDE, 5)]
+    segments = [seg(0, 10, SCOPE), seg(14, 30, WIDE)]
+    boundaries = [opening_ramp(frames)]
+    assert mid[1] > 0 and settle(segments, boundaries, INFO)[1:] == (boundaries, 0)
+
+
+def test_a_ramp_that_ends_somewhere_the_next_segment_is_not_is_merged():
+    # the shape left behind when a neighbouring segment was widened: the ramp lands on a narrow picture
+    narrow = (600, 0, 2640, 2160)
+    frames = [fit((0, 0, 3840, 2160), 0), fit((300, 0, 3240, 2160), 1), fit(narrow, 2)]
+    out_segments, out_boundaries, merges = settle(
+        [seg(0, 10, WIDE), seg(14, 40, WIDE)], [opening_ramp(frames)], INFO
+    )
+    assert merges == 1 and out_boundaries == []
+
+
+def test_a_ramp_that_barely_moves_the_picture_is_not_worth_following():
+    frames = [fit((0, 276 + k, 3840, 1608 - 2 * k), k) for k in range(6)]  # a few pixels in all
+    segments = [seg(0, 10, SCOPE), seg(14, 30, (0, 286, 3840, 1588))]
+    out_segments, out_boundaries, merges = settle(segments, [opening_ramp(frames)], INFO)
+    assert merges == 1 and out_boundaries == []
 
 
 def test_a_long_excursion_ramp_is_kept():
