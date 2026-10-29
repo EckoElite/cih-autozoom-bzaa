@@ -118,6 +118,29 @@ def test_bad_settings_are_rejected_with_a_message(env):
         Settings.from_env(env)
 
 
+def test_sample_interval_has_a_global_value_and_folder_overrides_with_the_longest_prefix_winning():
+    s = Settings.from_env({"SAMPLE_INTERVAL": "2", "SAMPLE_INTERVALS": "/media/tv=8;/media/tv/Slow Show=15"})
+    assert s.interval_for("/media/movies/Film.mkv") == 2
+    assert s.interval_for("/media/tv/Show/S01E01.mkv") == 8
+    assert s.interval_for("/media/tv/Slow Show/S01E01.mkv") == 15
+    assert s.interval_for("/media/tvx/other.mkv") == 2  # a prefix only matches at a folder boundary
+    assert Settings.from_env({}).interval_for("/anything") == 1.0
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"SAMPLE_INTERVAL": "0.5"},
+        {"SAMPLE_INTERVALS": "/media/tv"},
+        {"SAMPLE_INTERVALS": "/media/tv=fast"},
+        {"SAMPLE_INTERVALS": "=5"},
+    ],
+)
+def test_bad_sample_intervals_are_rejected(env):
+    with pytest.raises(ConfigError):
+        Settings.from_env(env)
+
+
 def test_quiet_hours_including_a_window_across_midnight():
     window = parse_quiet_hours("22:00-06:00")
     assert in_quiet_hours(window, time(23, 0)) and in_quiet_hours(window, time(5, 59))

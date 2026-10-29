@@ -16,17 +16,26 @@ from . import __version__
 from .analyze import analyze_file
 from .skip import inspect_file
 
-USAGE = "usage: python -m cih_analyzer [--analyze | --analyze-envelope] <file> [<file> ...]"
+USAGE = "usage: python -m cih_analyzer [--analyze | --analyze-envelope] [--sample-interval SECONDS] <file> [<file> ...]"
 
 
 def main(argv: list[str]) -> int:
+    interval: float | None = None
+    if "--sample-interval" in argv:
+        at = argv.index("--sample-interval")
+        try:
+            interval = float(argv[at + 1])
+        except (IndexError, ValueError):
+            print(USAGE, file=sys.stderr)
+            return 2
+        argv = argv[:at] + argv[at + 2 :]
     mode = argv[0] if argv and argv[0] in ("--analyze", "--analyze-envelope") else None
     paths = argv[1:] if mode else argv
     if not paths or (mode and len(paths) != 1):
         print(USAGE, file=sys.stderr)
         return 2
     if mode:
-        outcome = analyze_file(paths[0])
+        outcome = analyze_file(paths[0], sample_interval_s=interval)
         if outcome.timeline is None:
             print(json.dumps({"path": paths[0], "skip": outcome.skip}, ensure_ascii=False))
             return 1

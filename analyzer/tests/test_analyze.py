@@ -73,6 +73,18 @@ class TestAnalyzeFile:
         assert len(ramp.frames) == ramp.end_frame - ramp.start_frame + 1 > 50
         assert all(f.readable for f in ramp.frames) and ramp.confidence == 1.0
 
+    def test_a_sparse_sampling_interval_still_finds_the_exact_frame(self, tmp_path):
+        plan = [(SCOPE, 110), (WIDE, 150)]
+        path = make_video(tmp_path / "sparse.mp4", [Seg(20, r, level=lv) for r, lv in plan], keyint=25)
+        timeline = analyze_file(path, sample_interval_s=6).timeline
+        assert [(s.preset, s.boundary.frame) for s in timeline.segments] == [(2.39, 0), (16 / 9, 500)]
+
+    def test_command_line_accepts_a_sampling_interval(self, tmp_path, capsys):
+        path = make_video(tmp_path / "scope.mp4", [Seg(12, SCOPE)])
+        assert main(["--sample-interval", "4", "--analyze", str(path)]) == 0
+        assert load_timeline(capsys.readouterr().out).segments[0].preset == 2.39
+        assert main(["--sample-interval", "fast", "--analyze", str(path)]) == 2
+
     def test_skipped_files_come_back_with_a_reason(self, tmp_path):
         iso = tmp_path / "disc.iso"
         iso.write_bytes(b"x")

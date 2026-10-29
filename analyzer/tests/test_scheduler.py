@@ -215,6 +215,27 @@ def test_workers_stay_idle_while_paused(env):
     assert calls == [] and store.counts() == {"queued": 2}
 
 
+def test_the_default_runner_passes_the_folder_sampling_interval_to_the_worker(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        "cih_analyzer.scheduler.subprocess_runner",
+        lambda path, timeout, stop, sample_interval=None: (
+            seen.append((path, sample_interval)) or RunResult(skip="iso")
+        ),
+    )
+    store = Store(tmp_path / "s.sqlite")
+    root = tmp_path / "tv"
+    root.mkdir()
+    (root / "e.mkv").write_bytes(b"x")
+    base = str(tmp_path).replace("\\", "/")
+    settings = Settings(config_dir=tmp_path, media_roots=(base,), sample_intervals=((base + "/tv", 8.0),))
+    sched = Scheduler(settings, store, PathMap())
+    sched.scan_now()
+    sched.run_one()
+    assert seen == [(base + "/tv/e.mkv", 8.0)]
+    store.close()
+
+
 def test_a_stop_during_analysis_puts_the_job_back(env):
     sched, store, root, calls = env
     sched.runner = lambda path, timeout, stop: RunResult(error="stopped")

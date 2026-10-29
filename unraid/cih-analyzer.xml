@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>cih-analyzer</Name>
+  <Repository>ghcr.io/eckoelite/cih-analyzer:latest</Repository>
+  <Registry>https://github.com/EckoElite/cih-autozoom-bzaa/pkgs/container/cih-analyzer</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/EckoElite/cih-autozoom-bzaa/issues</Support>
+  <Project>https://github.com/EckoElite/cih-autozoom-bzaa</Project>
+  <Overview>Works out, once per file and offline, which part of the 16:9 frame holds the picture at every moment (letterbox, pillarbox, windowbox, films that change ratio, gradual matte moves) and serves that timeline over HTTP, so a player can scale the picture automatically on a constant-image-height projector setup. It only reads your media (mount every library read-only), never writes to it, and pauses while Plex is transcoding. The web page shows the queue, progress, errors and each title's timeline.</Overview>
+  <Category>MediaServer:Video Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8765]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/EckoElite/cih-autozoom-bzaa/main/unraid/cih-analyzer.xml</TemplateURL>
+  <Icon/>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>Optional: a Plex server (for Plex ids, recently-added priority and pausing during transcodes).</Requires>
+
+  <Config Name="Web UI and API port" Target="8765" Default="8765" Mode="tcp" Description="LAN only. The status page is at this port; the player add-on reads timelines from /api/v1/timeline." Type="Port" Display="always" Required="true" Mask="false">8765</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/cih-analyzer" Mode="rw" Description="The database (timelines, queue, overrides). Keep it: re-analysing a library takes days." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/cih-analyzer</Config>
+
+  <Config Name="Library: Music Videos" Target="/media/musicvideos" Default="" Mode="ro" Description="Mount each library read-only. Start with one small library to measure speed; leave the others empty and add them later. The folder name under /media must match a PATH_MAP rule." Type="Path" Display="always" Required="false" Mask="false"/>
+  <Config Name="Library: Movies" Target="/media/movies" Default="" Mode="ro" Description="Read-only." Type="Path" Display="always" Required="false" Mask="false"/>
+  <Config Name="Library: Concerts" Target="/media/concerts" Default="" Mode="ro" Description="Read-only." Type="Path" Display="always" Required="false" Mask="false"/>
+  <Config Name="Library: TV Shows" Target="/media/tv" Default="" Mode="ro" Description="Read-only. Large: set SAMPLE_INTERVALS (for example /media/tv=8) before mounting it." Type="Path" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Library: Other 1" Target="/media/other1" Default="" Mode="ro" Description="Read-only. Any further library; add its PATH_MAP rule." Type="Path" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Library: Other 2" Target="/media/other2" Default="" Mode="ro" Description="Read-only." Type="Path" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Library: Other 3" Target="/media/other3" Default="" Mode="ro" Description="Read-only." Type="Path" Display="advanced" Required="false" Mask="false"/>
+
+  <Config Name="PATH_MAP" Target="PATH_MAP" Default="/media/musicvideos|/musicvideos|/mnt/user/media/Music Videos" Mode="" Description="Equivalent names for the same folder, one rule per ;  and aliases separated by |  The first name is the path inside this container. Add Plex's path for each library and, if useful, the Unraid path. This is how a Plex path finds its timeline." Type="Variable" Display="always" Required="true" Mask="false">/media/musicvideos|/musicvideos|/mnt/user/media/Music Videos</Config>
+  <Config Name="MEDIA_ROOTS" Target="MEDIA_ROOTS" Default="/media" Mode="" Description="Folders to scan, separated by ;  Everything mounted under /media is scanned." Type="Variable" Display="advanced" Required="true" Mask="false">/media</Config>
+  <Config Name="PLEX_URL" Target="PLEX_URL" Default="" Mode="" Description="For example http://192.168.1.10:32400  Leave empty to run without Plex." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="PLEX_TOKEN" Target="PLEX_TOKEN" Default="" Mode="" Description="Your Plex token. Only read from here; never stored in the image or written to logs." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="PLEX_SKIP_SECTIONS" Target="PLEX_SKIP_SECTIONS" Default="" Mode="" Description="Plex library titles to ignore, separated by ;  (only affects Plex ids; what is analysed is what you mount)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="API_KEY" Target="API_KEY" Default="" Mode="" Description="If set, the API needs this as the X-Api-Key header. The status page asks for it once." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="CONCURRENCY" Target="CONCURRENCY" Default="1" Mode="" Description="Files analysed at once. Each runs at the lowest CPU and disk priority." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="QUIET_HOURS" Target="QUIET_HOURS" Default="" Mode="" Description="Optional HH:MM-HH:MM (local time) when analysis pauses, for example 18:00-23:30." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="PAUSE_ON_TRANSCODE" Target="PAUSE_ON_TRANSCODE" Default="1" Mode="" Description="1 pauses analysis while Plex is transcoding video; 0 never pauses." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="SAMPLE_INTERVAL" Target="SAMPLE_INTERVAL" Default="1" Mode="" Description="Seconds between the keyframes the first pass looks at. Larger is faster and can miss a very short change (at least 1)." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="SAMPLE_INTERVALS" Target="SAMPLE_INTERVALS" Default="" Mode="" Description="Per-folder overrides, for example /media/tv=8 ; longest folder wins." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="SCAN_INTERVAL" Target="SCAN_INTERVAL" Default="3600" Mode="" Description="Seconds between scans of the media folders." Type="Variable" Display="advanced" Required="false" Mask="false">3600</Config>
+  <Config Name="PLEX_INTERVAL" Target="PLEX_INTERVAL" Default="900" Mode="" Description="Seconds between reads of Plex's libraries." Type="Variable" Display="advanced" Required="false" Mask="false">900</Config>
+  <Config Name="LOG_LEVEL" Target="LOG_LEVEL" Default="INFO" Mode="" Description="DEBUG, INFO, WARNING or ERROR." Type="Variable" Display="advanced" Required="false" Mask="false">INFO</Config>
+  <Config Name="TZ" Target="TZ" Default="America/New_York" Mode="" Description="Time zone, used for quiet hours and for the times on the status page." Type="Variable" Display="advanced" Required="false" Mask="false">America/New_York</Config>
+  <Config Name="GPU (reserved)" Target="/dev/dri" Default="" Mode="" Description="Reserved for hardware decoding; not used yet. Leave empty." Type="Device" Display="advanced" Required="false" Mask="false"/>
+</Container>

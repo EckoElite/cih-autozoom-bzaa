@@ -169,6 +169,7 @@ def analyze_file(
     seg_params: SegmentationParams | None = None,
     refine_params: RefineParams | None = None,
     threads: int | None = None,
+    sample_interval_s: float | None = None,
 ) -> Analysis:
     """Analyze one file. Skipped files (ISO, 3D, extras, audio-only, broken) come back with a reason, not an error;
     anything else that goes wrong while decoding raises `ProbeError`."""
@@ -178,7 +179,8 @@ def analyze_file(
         return Analysis(None, inspected.skip)
     info = inspected.info
     seg_params = seg_params or SegmentationParams()
-    coarse = segment_samples(coarse_scan(path, info, threads=threads), info, seg_params)
+    scan_args = {} if sample_interval_s is None else {"min_interval_s": sample_interval_s}
+    coarse = segment_samples(coarse_scan(path, info, threads=threads, **scan_args), info, seg_params)
     result = refine(path, info, coarse, refine_params or RefineParams())
     timeline = build_timeline(path, info, result, seg_params, display_path=display_path, plex=plex)
     return Analysis(timeline, ramp_raw=ramp_raw_of(result))

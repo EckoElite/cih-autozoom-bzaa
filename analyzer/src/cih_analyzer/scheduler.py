@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -53,24 +54,46 @@ class Runner(Protocol):
     def __call__(self, path: str, timeout: float, stop: threading.Event) -> RunResult: ...
 
 
-def _low_priority_prefix() -> list[str]:
-    """`ionice -c3 nice -n 19` where those exist (Linux): the analysis only uses what Plex is not using."""
+@functools.cache
+def _low_priority_prefix() -> tuple[str, ...]:
+    """`ionice -c3 nice -n 19` where those exist and work (Linux): the analysis only uses what Plex is not using.
+    Each tool is tried once on `true`: a container runtime that forbids changing I/O priority must cost us the
+    priority, not every analysis."""
     prefix: list[str] = []
     if os.name == "posix":
-        if shutil.which("ionice"):
-            prefix += ["ionice", "-c", "3"]
-        if shutil.which("nice"):
-            prefix += ["nice", "-n", "19"]
-    return prefix
+        for tool, args in (("ionice", ["-c", "3"]), ("nice", ["-n", "19"])):
+            exe = shutil.which(tool)
+            if exe is None:
+                continue
+            try:
+                ok = (
+                    subprocess.run(  # noqa: S603 - fixed command
+                        [exe, *args, "true"], capture_output=True, timeout=10, check=False
+                    ).returncode
+                    == 0
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                ok = False
+            if ok:
+                prefix += [exe, *args]
+            else:
+                log.warning("%s does not work here; the analysis will run without it", tool)
+    return tuple(prefix)
 
 
-def subprocess_runner(path: str, timeout: float, stop: threading.Event) -> RunResult:
+def subprocess_runner(
+    path: str, timeout: float, stop: threading.Event, sample_interval: float | None = None
+) -> RunResult:
     """Analyse one file in a child process and parse the envelope it prints."""
     src = str(Path(__file__).resolve().parents[1])
     env = dict(os.environ)
     env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
     env["PYTHONUNBUFFERED"] = "1"
-    cmd = [*_low_priority_prefix(), sys.executable, "-m", "cih_analyzer", "--analyze-envelope", path]
+    cmd = [*_low_priority_prefix(), sys.executable, "-m", "cih_analyzer"]
+    log.debug("worker command prefix: %s", _low_priority_prefix() or "(normal priority)")
+    if sample_interval is not None:
+        cmd += ["--sample-interval", f"{sample_interval:g}"]
+    cmd += ["--analyze-envelope", path]
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         proc = subprocess.Popen(cmd, stdout=out, stderr=err, env=env)  # noqa: S603 - fixed command, no shell
         deadline = time.monotonic() + timeout
@@ -109,7 +132,7 @@ class Scheduler:
         store: Store,
         pathmap: PathMap,
         *,
-        runner: Runner = subprocess_runner,
+        runner: Runner | None = None,
         plex: PlexClient | None = None,
         now_local: Callable[[], datetime] = datetime.now,
         clock: Callable[[], float] = time.time,
@@ -117,7 +140,11 @@ class Scheduler:
         self.settings = settings
         self.store = store
         self.pathmap = pathmap
-        self.runner = runner
+        self.runner: Runner = runner or (
+            lambda path, timeout, stop: subprocess_runner(
+                path, timeout, stop, sample_interval=settings.interval_for(path)
+            )
+        )
         self.plex = (
             plex
             if plex is not None

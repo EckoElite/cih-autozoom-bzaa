@@ -24,3 +24,4 @@ Thumbs.db
 
 # site-specific facts (LAN addresses, share paths, titles); kept local, not published
 docs/LOCAL_FACTS.md
+docs/LOCAL_INSTALL.md

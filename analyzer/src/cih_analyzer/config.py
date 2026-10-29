@@ -16,6 +16,8 @@ template, never in code. Secrets (the Plex token, the API key) are kept out of `
 | `SCAN_INTERVAL` | seconds between scans of the media roots (default 3600) |
 | `PLEX_INTERVAL` | seconds between Plex syncs (default 900) |
 | `RECENT_DAYS` | titles added to Plex this recently are analysed first (default 14) |
+| `SAMPLE_INTERVAL` | seconds between the keyframes the first pass looks at (default 1; larger is faster, and can miss a short change) |
+| `SAMPLE_INTERVALS` | per-folder overrides, `prefix=seconds;prefix=seconds` (for example `/media/tv=8`), longest prefix wins |
 | `LOG_LEVEL` | default `INFO` |
 """
 
@@ -29,6 +31,7 @@ from datetime import time
 from pathlib import Path
 
 _FALSE = {"0", "false", "no", "off", ""}
+MIN_SAMPLE_INTERVAL = 1.0  # the first pass never samples more often than the coarse pass's own minimum
 
 
 class ConfigError(ValueError):
@@ -92,6 +95,18 @@ class Settings:
     recent_days: float = 14.0
     log_level: str = "INFO"
     analysis_timeout_s: float = 6 * 3600.0
+    sample_interval_s: float = 1.0
+    sample_intervals: tuple[tuple[str, float], ...] = ()
+
+    def interval_for(self, path: str) -> float:
+        """Seconds between sampled keyframes for a file: the longest folder override that contains it, else the
+        global setting."""
+        best, best_len = self.sample_interval_s, -1
+        for prefix, seconds in self.sample_intervals:
+            root = prefix.rstrip("/")
+            if (path == root or path.startswith(root + "/")) and len(root) > best_len:
+                best, best_len = seconds, len(root)
+        return best
 
     @property
     def db_path(self) -> Path:
@@ -111,6 +126,18 @@ class Settings:
         for rule in rules:
             if len(rule) < 2:
                 raise ConfigError(f"each PATH_MAP rule needs at least two paths separated by |, got {rule!r}")
+        intervals = []
+        for item in _split(env.get("SAMPLE_INTERVALS")):
+            prefix, _, seconds = item.rpartition("=")
+            try:
+                value = float(seconds)
+            except ValueError:
+                value = 0.0
+            if not prefix.strip() or value < MIN_SAMPLE_INTERVAL:
+                raise ConfigError(
+                    f"SAMPLE_INTERVALS entries look like /media/tv=8 (at least 1 s), got {item!r}"
+                )
+            intervals.append((prefix.strip(), value))
         port = int(_number(env, "PORT", 8765, 1))
         if port > 65535:
             raise ConfigError(f"PORT must be at most 65535, got {port}")
@@ -130,4 +157,6 @@ class Settings:
             plex_interval_s=_number(env, "PLEX_INTERVAL", 900, 10),
             recent_days=_number(env, "RECENT_DAYS", 14, 0),
             log_level=(env.get("LOG_LEVEL") or "INFO").strip().upper(),
+            sample_interval_s=_number(env, "SAMPLE_INTERVAL", 1.0, MIN_SAMPLE_INTERVAL),
+            sample_intervals=tuple(intervals),
         )

@@ -190,6 +190,8 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
                 else None,
                 "pause_on_transcode": settings.pause_on_transcode,
                 "scan_interval_s": settings.scan_interval_s,
+                "sample_interval_s": settings.sample_interval_s,
+                "sample_intervals": [list(i) for i in settings.sample_intervals],
             },
         }
 

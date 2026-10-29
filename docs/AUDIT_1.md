@@ -214,6 +214,16 @@ No requirement is missing from the design, and none of the ten lessons is repeat
 | DD24 | A timeline answer carries an extra `override` member (null, or `{mode, preset}`); raw ramp measurements are stored beside the timeline and served by `/api/v1/ramp` | R11 persisted per title; R14 raw-versus-fitted plot. The timeline schema itself is unchanged |
 | DD25 | On-demand analysis only accepts a file that exists under a media root (no `..`); the API key is compared in constant time and never logged; the Plex token travels in a header, never in a URL | Closes the path-traversal and token-in-log risks for the new endpoints |
 
+**Added during Phase 4 slice 5 (2026-10-29):**
+
+| ID | Change | Why |
+|---|---|---|
+| DD26 | ffmpeg is Debian 13's apt package (7.1.5) in `python:3.12-slim-trixie`, not a downloaded static build; the container's default user is `99:100`, with no `PUID`/`PGID` variables; the image has a `test` stage and CI runs the whole suite in it | No third-party download at build time, apt verifies signatures, and the tests run against exactly the shipped ffmpeg; 99:100 is what Unraid uses for appdata and shares |
+| DD27 | `ionice -c 3` and `nice -n 19` are each tried once and omitted (with a warning) if the runtime refuses them | A restrictive container must lose the priority, not fail every analysis |
+| DD28 | `SAMPLE_INTERVAL` (global) and `SAMPLE_INTERVALS` (per folder, longest prefix wins) set how often the first pass samples keyframes | The real library has about 40,000 files (the spec assumed 2,000+); TV can be sampled sparsely and movies densely (R12) |
+
+R10 status: the template, the install text with the GHCR visibility steps, and the anonymous-pull check are written; the check itself happens after the first publish.
+
 **R8 after the gate:** the Gap narrows. An HDR10+ sample exists; profile 5 is out of scope; interlaced is accepted as untested. The remaining R8 work is the planned synthetic fixtures.
 
 **Verdict after the gate:** all five gate items are answered. Six Gaps remain open (section 8, items 1 to 6, with item 1 now reduced to "interlaced and profile 5 are accepted as untested"). **Phase 4 may start.**
