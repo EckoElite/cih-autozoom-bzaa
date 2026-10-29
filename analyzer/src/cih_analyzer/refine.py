@@ -194,6 +194,16 @@ def _display_aspect(rect: Rect, info: VideoInfo) -> float:
     return rect[2] * sar_n / (rect[3] * sar_d)
 
 
+def _scan_boundary(*args, **kwargs) -> list[ScanFrame]:
+    """`scan_edges` for following a change: a lopsided frame (a bright part of the picture touching one edge, a dark
+    part reading as matte) is unreadable here, because its safe, centred rectangle would look like the old picture
+    and break a ramp in two."""
+    return [
+        replace(f, edges=None) if f.edges is not None and f.edges.lopsided else f
+        for f in scan_edges(*args, **kwargs)
+    ]
+
+
 def _narrow(
     path: str | Path,
     info: VideoInfo,
@@ -205,7 +215,7 @@ def _narrow(
     params: RefineParams,
 ) -> tuple[float, float]:
     """Shrink a long window to the stretch where the picture goes from `old` to `new`, using a stride pass."""
-    frames = scan_edges(path, info, t0, t1 - t0, threshold=threshold, step=params.stride_step_s)
+    frames = _scan_boundary(path, info, t0, t1 - t0, threshold=threshold, step=params.stride_step_s)
     tol = max(8.0, 0.012 * max(info.width, info.height))
 
     def state(f: ScanFrame) -> str | None:
@@ -250,7 +260,7 @@ def refine_boundary(
     if t1 - t0 > params.stride_over_s:
         t0, t1 = _narrow(path, info, t0, t1, old_rect, new_rect, threshold, params)
     diff_rect = _intersection(old_rect, new_rect)
-    frames = scan_edges(path, info, t0, t1 - t0, threshold=threshold, diff_rect=diff_rect)
+    frames = _scan_boundary(path, info, t0, t1 - t0, threshold=threshold, diff_rect=diff_rect)
     frame_s = 1 / info.fps
     flags: list[str] = []
 
@@ -263,7 +273,7 @@ def refine_boundary(
         if not head_ok and first - floor > frame_s and grown_head < params.max_widen_s:
             start = max(floor, first - params.widen_s)
             grown_head += first - start
-            extra = scan_edges(
+            extra = _scan_boundary(
                 path, info, start, first - start + frame_s, threshold=threshold, diff_rect=diff_rect
             )
             frames = [f for f in extra if f.t < first - EPSILON] + frames
@@ -271,7 +281,7 @@ def refine_boundary(
         if not tail_ok and ceiling - last > frame_s and grown_tail < params.max_widen_s:
             span = min(params.widen_s, ceiling - last)
             grown_tail += span
-            extra = scan_edges(path, info, last, span + frame_s, threshold=threshold, diff_rect=diff_rect)
+            extra = _scan_boundary(path, info, last, span + frame_s, threshold=threshold, diff_rect=diff_rect)
             frames = frames + [f for f in extra if f.t > last + EPSILON]
             grew = True
         if not grew:
@@ -500,6 +510,26 @@ def refine(
 
 
 TRUST_CONFIDENCE = 0.7
+MIN_SEGMENT_S = (
+    1.0  # a picture state shorter than this is not worth a zoom change, and is more often a misread
+)
+MIN_EXCURSION_S = 3.0  # a ramp that starts with a cut to a smaller picture must take at least this long
+EQUIVALENT_ZOOM = 0.03  # two rectangles whose zoom differs by less than this are the same for playback
+_BAND = (
+    3840 / 2.35 / 2160
+)  # the screen band's height as a share of the 16:9 output frame (nominal 2.35 screen)
+
+
+def _zoom(rect: Rect, info: VideoInfo) -> float:
+    """How much the player would scale this picture to fit the screen band (relative; the 16:9 output frame and a
+    nominal 2.35 screen), used only to tell whether two rectangles differ enough to matter."""
+    pw, ph = rect[2] / info.width, rect[3] / info.height
+    dar = info.dar if info.dar > 0 else 16 / 9
+    if dar >= 16 / 9:  # the frame fills the output's width
+        ph *= (16 / 9) / dar
+    else:  # the frame fills the output's height
+        pw *= dar / (16 / 9)
+    return min(1 / pw, _BAND / ph)
 
 
 def _trusted(b: RefinedBoundary) -> bool:
@@ -538,10 +568,20 @@ def settle(
     segs, bounds = list(segments), list(boundaries)
     merges = 0
 
+    def tiny(i: int) -> bool:
+        return len(segs) > 1 and segs[i].end - segs[i].start < MIN_SEGMENT_S
+
     def bad(i: int) -> bool:
         b = bounds[i]
         if not _trusted(b):
             return True
+        if b.kind == "ramp" and "ramp_after_cut" in b.flags and b.t - b.t_start < MIN_EXCURSION_S:
+            return True  # a short dip to a smaller picture and back is a fade or a flash, not a window that grows
+        if (
+            b.kind == "cut"
+            and abs(_zoom(segs[i].rect, info) / _zoom(segs[i + 1].rect, info) - 1) < EQUIVALENT_ZOOM
+        ):
+            return True  # a change that would move the picture by a few percent is not worth a zoom change
         if i == 0 and b.t_start <= segs[0].start + EPSILON:
             return True
         if i > 0 and b.t_start <= bounds[i - 1].t + EPSILON:
@@ -556,7 +596,8 @@ def settle(
         del bounds[k]
         merges += 1
     while len(segs) > 1:
-        k = next((i for i, s in enumerate(segs) if s.verified is False), None)
+        # a segment too short to matter (an end card, a flash) or that could not be read goes into its neighbour
+        k = next((i for i, s in enumerate(segs) if s.verified is False or tiny(i)), None)
         if k is None:
             break
         i = k - 1 if k > 0 else 0

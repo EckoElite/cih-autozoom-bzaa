@@ -193,6 +193,16 @@ def test_a_cut_to_a_small_inset_that_grows_back_is_a_ramp_after_the_cut():
     assert all(a > b for a, b in zip(lefts, lefts[1:], strict=False))
 
 
+def test_a_ramp_whose_last_step_is_a_few_pixels_still_arrives():
+    # the real Scott Pilgrim ramp ends 7 px short and then lands: a fixed "small step" test rejected it
+    frames = opening_frames()
+    last = frames[89].edges  # the last ramp frame, close to FULL
+    near = Edges(top=last.top, bottom=last.bottom, left=7, right=633)
+    frames[87:90] = [ScanFrame(f.t, near) for f in frames[87:90]]
+    result = analyze_transition(frames, FULL, FULL, FPS)
+    assert result.kind == "ramp" and "ramp_after_cut" in result.flags
+
+
 def test_flash_frames_inside_a_ramp_are_set_aside_and_do_not_bend_the_fit():
     result = analyze_transition(opening_frames(flashes=(50, 51)), FULL, FULL, FPS)
     assert result.kind == "ramp"

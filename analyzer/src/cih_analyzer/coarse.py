@@ -88,13 +88,19 @@ def parse_metadata(text: str, info: VideoInfo, scale_width: int = SCALE_WIDTH) -
     def flush() -> None:
         needed = ("t", "x", "y", "w", "h", "yavg")
         if all(k in current for k in needed):
+            x, y = round(current["x"] * fx), round(current["y"] * fy)
+            w, h = round(current["w"] * fx), round(current["h"] * fy)
+            # a matte is centred: centre the crop on its smaller margin, so a dark part of the picture that touches
+            # one edge cannot be mistaken for a matte (the rectangle only ever grows; see frames.measure_edges)
+            margin_x = max(0, min(x, info.width - (x + w)))
+            margin_y = max(0, min(y, info.height - (y + h)))
             samples.append(
                 Sample(
                     t=current["t"] - info.start_time,
-                    x=round(current["x"] * fx),
-                    y=round(current["y"] * fy),
-                    w=round(current["w"] * fx),
-                    h=round(current["h"] * fy),
+                    x=margin_x,
+                    y=margin_y,
+                    w=info.width - 2 * margin_x,
+                    h=info.height - 2 * margin_y,
                     yavg=current["yavg"] / scale,
                 )
             )

@@ -22,7 +22,7 @@ import subprocess
 import tempfile
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -44,12 +44,19 @@ FRAME_TIMEOUT_S = 900.0
 _PTS_TIME = re.compile(r"pts_time:\s*(-?\d+(?:\.\d+)?)")
 
 
+LOPSIDED = 0.02  # margins differing by more than this share of the frame are not a centred matte
+
+
 @dataclass(frozen=True)
 class Edges:
+    """`lopsided` marks a measurement whose two margins differed (see `measure_edges`): the rectangle is safe to use
+    for a segment, but a frame like that says nothing reliable about where a ramp has got to."""
+
     top: float
     bottom: float
     left: float
     right: float
+    lopsided: bool = field(default=False, compare=False)
 
     @property
     def rect(self) -> tuple[int, int, int, int]:
@@ -92,7 +99,17 @@ def measure_edges(luma: np.ndarray, threshold: float) -> Edges | None:
     horizontal = _largest_block(cols, max(2, round(COLUMN_GAP_FRACTION * width)))
     if vertical is None or horizontal is None:
         return None
-    return Edges(top=vertical[0], bottom=vertical[1], left=horizontal[0], right=horizontal[1])
+    # A matte is centred. A picture that touches one edge of the frame and stops short of the other (a bright sky
+    # over a dark ground, a title card) has lost its dark part, not gained a matte, so each axis is centred on its
+    # smaller margin: the rectangle only ever grows, and a picture is never shown bigger than it is.
+    margin_y = min(vertical[0], height - vertical[1])
+    margin_x = min(horizontal[0], width - horizontal[1])
+    lopsided = abs(vertical[0] - (height - vertical[1])) > max(8.0, LOPSIDED * height) or abs(
+        horizontal[0] - (width - horizontal[1])
+    ) > max(8.0, LOPSIDED * width)
+    return Edges(
+        top=margin_y, bottom=height - margin_y, left=margin_x, right=width - margin_x, lopsided=lopsided
+    )
 
 
 def matte_level(luma: np.ndarray, rect: tuple[int, int, int, int], native_to_8bit: float) -> float | None:
@@ -269,8 +286,10 @@ def scan_edges(
         previous[:] = [luma]
 
     times = _stream_luma(path, info, start, duration, step, measure, timeout)
-    frames = []
+    frames: list[ScanFrame] = []
     for i, (edges, diff, mean) in enumerate(measured):
         t = times[i] if i < len(times) else (frames[-1].t + 1 / info.fps if frames else start)
+        if frames and t <= frames[-1].t + 1e-6:
+            continue  # a decoder can flush its last frames with one repeated timestamp; they add nothing
         frames.append(ScanFrame(t, edges, diff, mean))
     return frames

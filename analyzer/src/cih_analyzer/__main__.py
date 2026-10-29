@@ -35,7 +35,11 @@ def main(argv: list[str]) -> int:
         print(USAGE, file=sys.stderr)
         return 2
     if mode:
-        outcome = analyze_file(paths[0], sample_interval_s=interval)
+        try:
+            outcome = analyze_file(paths[0], sample_interval_s=interval)
+        except Exception as exc:  # noqa: BLE001 - say what went wrong in one line, with an exit code of its own
+            print(f"{type(exc).__name__}: {' '.join(str(exc).split())[:400]}", file=sys.stderr)
+            return 3
         if outcome.timeline is None:
             print(json.dumps({"path": paths[0], "skip": outcome.skip}, ensure_ascii=False))
             return 1

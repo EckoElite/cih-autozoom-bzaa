@@ -28,6 +28,7 @@ EDGE_NAMES = ("top", "bottom", "left", "right")
 EPS = 1e-9
 STABLE_PX = 2.0
 STABLE_SHARE = 0.8
+ARRIVAL_SHARE = 0.1  # a ramp is at its destination when it is within this share of its furthest excursion
 DRIFT_PX = 1.0  # most the picture edge may drift between the two halves of a window's quiet stretch
 SCENE_CUT_MIN_DIFF = 6.0
 SCENE_CUT_RATIO = 4.0
@@ -275,7 +276,12 @@ def _excursion_start(frames: list[ScanFrame], old: Edges, new: Edges, params: Ra
             end += 1
         if end - pos + 1 < params.min_ramp_frames or end + 1 >= len(readable):
             return None
-        return i if gap(readable[end][1], readable[end + 1][1]) < params.jump_px else None
+        # The run must arrive at `new`, not just stop. A ramp's last step is small, or it ends close to where it is
+        # going compared with how far it travelled; a subtitle that vanishes ends as far away as it ever was.
+        last_out, first_in = readable[end][1], readable[end + 1][1]
+        reach = max(gap(readable[k][1], new) for k in range(pos, end + 1))
+        arrived = gap(last_out, first_in) < params.jump_px or gap(last_out, new) <= ARRIVAL_SHARE * reach
+        return i if arrived else None
     return None
 
 

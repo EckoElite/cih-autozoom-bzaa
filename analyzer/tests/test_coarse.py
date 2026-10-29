@@ -22,7 +22,7 @@ CANNED = """frame:0    pts:0       pts_time:0
 lavfi.signalstats.YAVG=276.8
 lavfi.signalstats.YBITDEPTH=9
 lavfi.cropdetect.x=0
-lavfi.cropdetect.y=60
+lavfi.cropdetect.y=90
 lavfi.cropdetect.w=960
 lavfi.cropdetect.h=360
 frame:1    pts:96096   pts_time:4.004
@@ -42,10 +42,31 @@ def test_parse_scales_back_to_full_resolution_and_normalises_luma_to_8_bit():
     samples = parse_metadata(CANNED, info)
     assert len(samples) == 2  # the third frame has no time or crop and is skipped
     first, second = samples
-    assert (first.x, first.y, first.w, first.h) == (0, 240, 3840, 1440)  # 960 wide -> x4
+    assert (first.x, first.y, first.w, first.h) == (0, 360, 3840, 1440)  # 960 wide -> x4
     assert first.t == pytest.approx(-0.5)  # start_time subtracted: the player's clock
     assert first.yavg == pytest.approx(276.8 / 4)  # 10-bit to 8-bit scale
     assert second.t == pytest.approx(3.504) and second.yavg == pytest.approx(16.0)  # 10-bit black is 64
+
+
+def test_a_crop_that_touches_one_edge_is_centred_on_its_smaller_margin():
+    # a bright top with a dark bottom (a title card, a sky): no matte is that lopsided, so the dark part is not matte
+    top_aligned = """frame:0    pts:0       pts_time:1
+lavfi.signalstats.YAVG=80
+lavfi.cropdetect.x=0
+lavfi.cropdetect.y=0
+lavfi.cropdetect.w=960
+lavfi.cropdetect.h=240
+frame:1    pts:1       pts_time:2
+lavfi.signalstats.YAVG=80
+lavfi.cropdetect.x=0
+lavfi.cropdetect.y=100
+lavfi.cropdetect.w=960
+lavfi.cropdetect.h=340
+"""
+    info = make_info(3840, 2160, pix_fmt="yuv420p")
+    first, second = parse_metadata(top_aligned, info)
+    assert (first.x, first.y, first.w, first.h) == (0, 0, 3840, 2160)  # nothing above, so no matte at all
+    assert (second.x, second.y, second.w, second.h) == (0, 400, 3840, 1360)  # 100 above, 100 below: kept
 
 
 @pytest.mark.parametrize(

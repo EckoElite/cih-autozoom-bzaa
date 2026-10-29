@@ -117,7 +117,9 @@ def subprocess_runner(
     try:
         data = json.loads(stdout.splitlines()[-1])
     except (ValueError, IndexError):
-        return RunResult(error="the analysis printed nothing usable")
+        # the worker died before printing its answer: the reason is the last line it wrote to stderr
+        tail = " ".join(stderr.splitlines()[-1].split())[:400] if stderr else "the analysis printed nothing"
+        return RunResult(error=redact(tail))
     if "skip" in data:
         return RunResult(skip=str(data["skip"]))
     return RunResult(

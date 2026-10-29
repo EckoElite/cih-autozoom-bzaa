@@ -96,3 +96,33 @@ def test_a_chain_of_untrusted_boundaries_collapses_to_the_widest_rectangle():
         and out_boundaries == []
         and [(s.start, s.end, s.rect) for s in out_segments] == [(0, 40, WIDE)]
     )
+
+
+def ramp(t_start, t, *, flags=("ramp_after_cut",), confidence=1.0):
+    return RefinedBoundary("ramp", t, round(t * 24), t_start, None, None, None, confidence=confidence, flags=flags)  # fmt: skip
+
+
+def test_a_short_dip_to_a_smaller_picture_and_back_is_a_fade_not_a_ramp():
+    segments = [seg(0, 48.8, WIDE), seg(49.7, 100, WIDE)]
+    out_segments, out_boundaries, merges = settle(segments, [ramp(48.8, 49.7)], INFO)
+    assert merges == 1 and out_boundaries == [] and [(s.start, s.end) for s in out_segments] == [(0, 100)]
+
+
+def test_a_long_excursion_ramp_is_kept():
+    segments = [seg(0, 1.6, WIDE), seg(17.8, 100, WIDE)]
+    boundaries = [ramp(1.6, 17.8)]
+    assert settle(segments, boundaries, INFO)[1:] == (boundaries, 0)
+
+
+def test_a_cut_between_nearly_identical_pictures_is_not_worth_a_zoom_change():
+    a, b = (0, 70, 3840, 2020), (0, 86, 3840, 1988)  # about 1.6% apart in zoom
+    out_segments, out_boundaries, merges = settle([seg(0, 10, a), seg(10, 20, b)], [cut(10.0)], INFO)
+    assert merges == 1 and out_boundaries == [] and out_segments[0].rect == a  # the larger of the two
+    _, kept, merges = settle([seg(0, 10, SCOPE), seg(10, 20, WIDE)], [cut(10.0)], INFO)
+    assert merges == 0 and len(kept) == 1  # 2.39 against 16:9 is a real change
+
+
+def test_a_segment_under_a_second_is_folded_into_its_neighbour():
+    segments = [seg(0, 20, WIDE), seg(20, 20.4, IMAX)]
+    out_segments, out_boundaries, merges = settle(segments, [cut(20.0)], INFO)
+    assert merges == 1 and out_boundaries == [] and [(s.start, s.end) for s in out_segments] == [(0, 20.4)]

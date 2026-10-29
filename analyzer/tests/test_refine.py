@@ -56,6 +56,19 @@ def analyse(path, **kw):
     return info, coarse, refine(path, info, coarse, **kw)
 
 
+def test_a_picture_that_touches_one_edge_is_centred_on_its_smaller_margin():
+    import numpy as np
+
+    # bright upper two thirds, dark lower third (a sky over a dark ground): no matte, so the whole frame
+    luma = np.full((360, 640), 16, dtype=np.uint8)
+    luma[:240, :] = 120
+    assert measure_edges(luma, 19.0).rect == (0, 0, 640, 360)
+    # a centred picture is untouched
+    luma = np.full((360, 640), 16, dtype=np.uint8)
+    luma[46:314, :] = 120
+    assert measure_edges(luma, 19.0).rect == (0, 46, 640, 268)
+
+
 @NEEDS_FFMPEG
 class TestFrames:
     def test_edges_are_found_in_every_frame_and_times_are_the_players(self, tmp_path):
