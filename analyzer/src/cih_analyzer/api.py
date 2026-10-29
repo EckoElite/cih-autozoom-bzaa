@@ -190,6 +190,8 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
             "settings": {
                 "concurrency": scheduler.workers,
                 "concurrency_env": settings.concurrency,
+                "concurrency_saved": store.get_meta("workers") or None,
+                "start_paused": settings.start_paused,
                 "max_workers": MAX_WORKERS,
                 "quiet_hours": [t.strftime("%H:%M") for t in settings.quiet_hours]
                 if settings.quiet_hours
@@ -260,6 +262,11 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
         """How many files are analysed at once. Raising it starts more now; lowering it stops nothing that is running,
         the surplus workers just take no new file. Saved across restarts, and wins over the CONCURRENCY setting."""
         return {"workers": scheduler.set_workers(body.workers), "max_workers": MAX_WORKERS}
+
+    @app.delete("/api/v1/concurrency", dependencies=secured)
+    def reset_concurrency() -> dict[str, Any]:
+        """Forget the saved count: the CONCURRENCY setting applies again, now and at every start."""
+        return {"workers": scheduler.reset_workers(), "max_workers": MAX_WORKERS}
 
     @app.post("/api/v1/pause", dependencies=secured)
     def pause() -> dict[str, Any]:

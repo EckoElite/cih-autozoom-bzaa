@@ -111,6 +111,7 @@ All settings are environment variables; change them by editing the container and
 | `API_KEY` | | if set, the API needs it as the `X-Api-Key` header |
 | `CONCURRENCY` | `1` | files analysed at once when the container first starts; each runs at the lowest CPU and disk priority. Change it later on the status page ("Files analysed at once"): raising it starts more now, lowering it lets running files finish and takes no new ones. A count saved there is kept across restarts and wins over this setting |
 | `QUIET_HOURS` | | `HH:MM-HH:MM` local time when analysis pauses |
+| `START_PAUSED` | `0` | `1` starts with analysis paused until Resume on the status page; the queue still fills, so chosen files can be put first (search the title, then "Analyze again") before anything runs |
 | `PAUSE_ON_TRANSCODE` | `1` | pause while Plex transcodes video |
 | `SAMPLE_INTERVAL` | `1` | seconds between sampled keyframes (at least 1) |
 | `SAMPLE_INTERVALS` | | per-folder overrides, `prefix=seconds;prefix=seconds` |

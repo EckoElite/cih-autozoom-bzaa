@@ -43,7 +43,7 @@
     </div>
     <div class="row">
       <label>Files analysed at once <input type="number" id="workers" min="1" max="16" style="width:4.5em"></label>
-      <button id="setworkers">Apply</button>
+      <button id="setworkers">Apply</button><button id="resetworkers" title="Forget the saved count and use the CONCURRENCY setting from the container template">Use template setting</button>
       <span class="muted" id="workershint">Raising it starts more now; lowering it lets running files finish and takes no new ones. Saved across restarts.</span>
     </div>
   </section>
@@ -125,6 +125,9 @@ async function refresh() {
     const sc = s.scheduler;
     const wi = $("workers"); wi.max = s.settings.max_workers;
     if (document.activeElement !== wi) wi.value = sc.workers;
+    $("workershint").textContent = "Raising it starts more now; lowering it lets running files finish and takes no new ones. " +
+      (s.settings.concurrency_saved ? "Saved across restarts (template says " + s.settings.concurrency_env + "). " : "Using the template setting (" + s.settings.concurrency_env + "). ") +
+      (s.settings.start_paused ? "The template starts the container paused." : "");
     $("sched").textContent = (sc.paused ? "Paused: " + sc.paused + ". " : "Running. ") + sc.busy + " of " + sc.workers + " worker(s) busy" +
       (sc.busy > sc.workers ? " (" + (sc.busy - sc.workers) + " finishing, then stopping)" : "") + ". " +
       (sc.last_scan ? "Last scan " + when(sc.last_scan.at) + " (" + sc.last_scan.seen + " files). " : "") +
@@ -213,6 +216,13 @@ $("setworkers").onclick = async () => {
     const r = await json("/api/v1/concurrency", { method: "POST", body: { workers: n } });
     await refresh();
     note("Analysing " + r.workers + " file(s) at once");
+  } catch (e) { note("Could not change the count: " + e.message, "bad"); }
+};
+$("resetworkers").onclick = async () => {
+  try {
+    const r = await json("/api/v1/concurrency", { method: "DELETE" });
+    await refresh();
+    note("Back to the template setting: " + r.workers + " file(s) at once");
   } catch (e) { note("Could not change the count: " + e.message, "bad"); }
 };
 $("reanalyze").onclick = () => current && analyze(current);

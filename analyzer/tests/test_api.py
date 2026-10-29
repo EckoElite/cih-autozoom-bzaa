@@ -91,6 +91,10 @@ def test_the_worker_count_is_set_and_reported_through_the_api(api):
     for bad in (0, 17, "x"):
         assert client.post("/api/v1/concurrency", json={"workers": bad}).status_code == 422
     assert sched.workers == 5
+    assert status["settings"]["concurrency_saved"] == "5" and status["settings"]["start_paused"] is False
+    assert client.delete("/api/v1/concurrency").json() == {"workers": 1, "max_workers": 16}
+    after = client.get("/api/v1/status").json()["settings"]
+    assert after["concurrency"] == 1 and after["concurrency_saved"] is None
 
 
 def test_health_and_the_page_are_served(api):

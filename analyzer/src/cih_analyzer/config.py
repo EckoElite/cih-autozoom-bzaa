@@ -10,7 +10,8 @@ template, never in code. Secrets (the Plex token, the API key) are kept out of `
 | `PLEX_SKIP_SECTIONS` | library titles to ignore, separated by `;` |
 | `API_KEY` | if set, `/api/v1/*` needs it as `X-Api-Key` (or `key=`) |
 | `PORT` | HTTP port (default 8765) |
-| `CONCURRENCY` | files analysed at once (default 1) |
+| `CONCURRENCY` | files analysed at start-up (default 1); a count saved from the status page takes its place until cleared there |
+| `START_PAUSED` | `1`: start with analysis paused, until Resume on the status page (default off). The queue still fills, and files can be put first meanwhile |
 | `QUIET_HOURS` | `HH:MM-HH:MM`, local time: analysis pauses inside this window |
 | `PAUSE_ON_TRANSCODE` | pause while Plex is transcoding (default on) |
 | `SCAN_INTERVAL` | seconds between scans of the media roots (default 3600) |
@@ -90,6 +91,7 @@ class Settings:
     concurrency: int = 1
     quiet_hours: tuple[time, time] | None = None
     pause_on_transcode: bool = True
+    start_paused: bool = False
     scan_interval_s: float = 3600.0
     plex_interval_s: float = 900.0
     recent_days: float = 14.0
@@ -153,6 +155,7 @@ class Settings:
             concurrency=int(_number(env, "CONCURRENCY", 1, 1)),
             quiet_hours=parse_quiet_hours(env.get("QUIET_HOURS")),
             pause_on_transcode=(env.get("PAUSE_ON_TRANSCODE", "1").strip().lower() not in _FALSE),
+            start_paused=(env.get("START_PAUSED", "0").strip().lower() not in _FALSE),
             scan_interval_s=_number(env, "SCAN_INTERVAL", 3600, 10),
             plex_interval_s=_number(env, "PLEX_INTERVAL", 900, 10),
             recent_days=_number(env, "RECENT_DAYS", 14, 0),

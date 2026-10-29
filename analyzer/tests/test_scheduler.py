@@ -264,6 +264,47 @@ def test_the_worker_count_is_validated_and_does_not_start_workers_before_start(e
     assert sched.set_workers(2) == 2 and sched._workers == {} and calls == []
 
 
+def test_start_paused_keeps_workers_idle_until_resumed_and_lets_a_file_go_first(tmp_path):
+    root = tmp_path / "media"
+    root.mkdir()
+    for name in ("a.mkv", "b.mkv", "c.mkv"):
+        (root / name).write_bytes(b"x" * 10)
+    base = str(root).replace("\\", "/")
+    store = Store(tmp_path / "s.sqlite")
+    settings = Settings(config_dir=tmp_path, media_roots=(base,), scan_interval_s=60, start_paused=True)
+    ran: list[str] = []
+
+    def runner(path, timeout, stop):
+        ran.append(path.rsplit("/", 1)[1])
+        return RunResult(timeline=timeline(path))
+
+    sched = Scheduler(settings, store, PathMap([[base, "/movies"]]), runner=runner)
+    sched.scan_now()
+    sched.start()
+    try:
+        assert sched.paused_reason() == "paused"
+        assert sched.request("/movies/c.mkv", PRIORITY_DEMAND) == "queued"  # asked for while paused
+        time.sleep(0.3)
+        assert ran == [] and store.counts() == {"queued": 3}
+        sched.resume()
+        assert wait_for(lambda: store.counts() == {"done": 3}, 20)
+        assert ran[0] == "c.mkv"  # the file asked for went first, not the first one queued
+    finally:
+        sched.stop(5)
+    store.close()
+
+
+def test_forgetting_the_saved_count_goes_back_to_the_setting(tmp_path):
+    store = Store(tmp_path / "s.sqlite")
+    settings = Settings(config_dir=tmp_path, media_roots=(), concurrency=2)
+    sched = Scheduler(settings, store, PathMap())
+    sched.set_workers(7)
+    assert Scheduler(settings, store, PathMap()).workers == 7
+    assert sched.reset_workers() == 2 and sched.workers == 2
+    assert Scheduler(settings, store, PathMap()).workers == 2
+    store.close()
+
+
 def test_a_saved_count_that_is_unreadable_falls_back_to_the_setting(tmp_path):
     store = Store(tmp_path / "s.sqlite")
     store.set_meta("workers", "many")

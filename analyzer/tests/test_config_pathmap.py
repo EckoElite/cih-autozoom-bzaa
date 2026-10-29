@@ -86,9 +86,11 @@ def test_settings_defaults_and_parsing():
             "CONCURRENCY": "2",
             "QUIET_HOURS": "18:00-23:30",
             "PAUSE_ON_TRANSCODE": "0",
+            "START_PAUSED": "1",
             "PLEX_SKIP_SECTIONS": "YouTube;Music",
         }
     )
+    assert s.start_paused is True and Settings.from_env({}).start_paused is False
     assert s.media_roots == ("/media/movies", "/media/tv") and s.concurrency == 2
     assert s.path_map[0] == ("/media/movies", "/movies", "/mnt/user/media/Movies")
     assert s.plex_url == "http://plex:32400" and s.plex_enabled and s.pause_on_transcode is False

@@ -158,7 +158,7 @@ class Scheduler:
         self.clock = clock
         self.stop_event = threading.Event()
         self._threads: list[threading.Thread] = []
-        self._manual_pause = False
+        self._manual_pause = settings.start_paused
         self._transcode: tuple[float, bool] = (0.0, False)
         self.last_scan: dict | None = None
         self.last_plex: dict | None = None
@@ -173,7 +173,7 @@ class Scheduler:
     def _initial_workers(self) -> int:
         """The count saved from the web page or the API, else the CONCURRENCY setting."""
         saved = self.store.get_meta(WORKERS_META)
-        if saved is not None:
+        if saved:  # an empty value is a cleared count
             try:
                 return max(1, min(MAX_WORKERS, int(saved)))
             except ValueError:
@@ -191,6 +191,14 @@ class Scheduler:
         if not 1 <= count <= MAX_WORKERS:
             raise ValueError(f"the worker count must be from 1 to {MAX_WORKERS}")
         self.store.set_meta(WORKERS_META, str(count))
+        return self.set_workers_unsaved(count)
+
+    def reset_workers(self) -> int:
+        """Forget the saved count and go back to the CONCURRENCY setting, now and at every start."""
+        self.store.set_meta(WORKERS_META, "")
+        return self.set_workers_unsaved(max(1, min(MAX_WORKERS, self.settings.concurrency)))
+
+    def set_workers_unsaved(self, count: int) -> int:
         self._target = count
         self._spawn_workers()
         return count
