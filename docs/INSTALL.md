@@ -16,14 +16,13 @@ kept out of the public repository.)
 
 GitHub Actions builds and publishes `ghcr.io/eckoelite/cih-analyzer` whenever `main` changes.
 
-**A new package on GHCR starts private.** Make it public once, so Unraid can pull it without a login:
+**Check that the package is public.** Unraid pulls without a login only if it is. The first publish from this public
+repository came out public (verified 2026-10-29: an anonymous registry request returned the manifest, and an anonymous
+`docker pull` on the PC succeeded and started a healthy container). To check again from any machine without logging
+in: `docker logout ghcr.io` then `docker pull ghcr.io/eckoelite/cih-analyzer:latest`.
 
-1. On github.com open your profile, then **Packages**, then **cih-analyzer**.
-2. **Package settings**, scroll to **Danger Zone**, **Change package visibility**, choose **Public**, confirm.
-3. Check it from any machine without logging in: `docker logout ghcr.io` then
-   `docker pull ghcr.io/eckoelite/cih-analyzer:latest` (or open
-   `https://ghcr.io/token?scope=repository:eckoelite/cih-analyzer:pull`; a JSON answer with a token means the package is
-   public, an error means it is still private).
+If it ever turns out to be private: on github.com open your profile, then **Packages**, then **cih-analyzer**, then
+**Package settings**, **Danger Zone**, **Change package visibility**, **Public**.
 
 If you prefer to keep it private, Unraid needs to log in first: create a GitHub personal access token with only
 `read:packages`, and run `docker login ghcr.io` in the Unraid web terminal. The token then lives on the server; it is
