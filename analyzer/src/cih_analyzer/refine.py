@@ -14,7 +14,6 @@ Three jobs, all at full resolution and all decoding only short windows of the fi
 
 from __future__ import annotations
 
-import statistics
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
@@ -46,7 +45,7 @@ class RefineParams:
     probe_s: float = 0.4  # decoded per segment probe
     probes: int = 3
     probes_unsure: int = 8
-    confirm_share: float = 0.6
+    dark_luma: float = 22.0  # frames darker than this (8-bit mean luma) say nothing about where the matte is
     ramp: RampParams = field(default_factory=RampParams)
 
 
@@ -127,17 +126,14 @@ def _intersection(a: Rect, b: Rect, shrink: int = 8) -> Rect | None:
     return (x0, y0, x1 - x0, y1 - y0) if x1 - x0 >= 16 and y1 - y0 >= 16 else None
 
 
-def _median_edges(items: list[Edges]) -> Edges:
+def _union(items: list[Edges]) -> Edges:
+    """The smallest picture that contains every one of `items`."""
     return Edges(
-        top=statistics.median(e.top for e in items),
-        bottom=statistics.median(e.bottom for e in items),
-        left=statistics.median(e.left for e in items),
-        right=statistics.median(e.right for e in items),
+        top=min(e.top for e in items),
+        bottom=max(e.bottom for e in items),
+        left=min(e.left for e in items),
+        right=max(e.right for e in items),
     )
-
-
-def _edge_gap(a: Edges, b: Edges) -> float:
-    return max(abs(a.top - b.top), abs(a.bottom - b.bottom), abs(a.left - b.left), abs(a.right - b.right))
 
 
 def _file_threshold(path: str | Path, info: VideoInfo, segments: list[CoarseSegment]) -> float:
@@ -168,23 +164,29 @@ def probe_segment(
     found: list[Edges] = []
     for t in times:
         frames = scan_edges(path, info, t, params.probe_s, threshold=threshold)
-        edges = [f.edges for f in frames if f.edges is not None]
+        # a dark frame cannot say where the matte is, and a picture is never smaller than the biggest it shows,
+        # so each probe reports the union of the edges of its bright enough frames
+        edges = [
+            f.edges for f in frames if f.edges is not None and (f.mean is None or f.mean >= params.dark_luma)
+        ]
         if len(edges) >= 3:
-            found.append(_median_edges(edges))
+            found.append(_union(edges))
     if not found:
         return SegmentCheck("unreadable", seg.rect, 0, 0)
-    cluster = max(([e for e in found if _edge_gap(e, c) <= tol] for c in found), key=len)
-    if len(cluster) / len(found) < params.confirm_share:
-        return SegmentCheck("unreadable", seg.rect, len(cluster), len(found))
-    consensus = _median_edges(cluster)
-    rect = consensus.rect
-    if _distance(consensus, seg.rect) <= tol:
-        return SegmentCheck("confirmed", rect, len(cluster), len(found))
-    near_left = left is not None and _distance(consensus, left) <= tol
-    near_right = right is not None and _distance(consensus, right) <= tol
+    union = _union(found)
+    if _distance(union, seg.rect) <= tol:
+        return SegmentCheck("confirmed", union.rect, len(found), len(found))
+    near_left = left is not None and _distance(union, left) <= tol
+    near_right = right is not None and _distance(union, right) <= tol
     if near_left or near_right:
-        return SegmentCheck("refuted", rect, len(cluster), len(found), into_left=near_left)
-    return SegmentCheck("corrected", rect, len(cluster), len(found))
+        return SegmentCheck("refuted", union.rect, len(found), len(found), into_left=near_left)
+    bigger = _union([union, _rect_edges(seg.rect)])
+    if _distance(union, bigger.rect) <= tol:
+        # the probes show a larger picture than the coarse pass did (a dark scene had cropped it): take theirs
+        return SegmentCheck("corrected", union.rect, len(found), len(found))
+    # the probes show less than the coarse pass did (dark content, or a subtitle that stretched the crop): the
+    # larger rectangle is the safe one, because a rectangle that is too small makes the picture too big for the screen
+    return SegmentCheck("confirmed", bigger.rect, len(found), len(found))
 
 
 def _display_aspect(rect: Rect, info: VideoInfo) -> float:
@@ -484,11 +486,81 @@ def refine(
                 start, end, rect, aspect, label if snapped else None, seg.confidence, verified, tuple(flags)
             )
         )
-    flags = list(coarse.flags)
+    out, refined, merged = settle(out, refined, info)
+    flags = [f for f in coarse.flags if f not in ("var", "ramp_candidate")]
     if dropped:
         flags.append("segments_refuted")
+    if merged:
+        flags.append("uncertain_merged")
+    if len({(s.preset, round(s.aspect, 2) if s.preset is None else 0) for s in out}) > 1:
+        flags.append("var")
     if any(b.kind == "ramp" for b in refined):
         flags.append("ramp")
-    if any("low_confidence" in b.flags or b.confidence < 0.7 for b in refined):
-        flags.append("low_confidence")
     return RefineResult(tuple(out), tuple(refined), tuple(dropped), tuple(dict.fromkeys(flags)))
+
+
+TRUST_CONFIDENCE = 0.7
+
+
+def _trusted(b: RefinedBoundary) -> bool:
+    return b.confidence >= TRUST_CONFIDENCE and "unresolved" not in b.flags
+
+
+def _merge_pair(a: RefinedSegment, b: RefinedSegment, info: VideoInfo) -> RefinedSegment:
+    """The two segments as one, over the smallest rectangle that holds both: a rectangle that is too small makes
+    the picture too big for the screen, one that is too large only leaves bars."""
+    union = _union([_rect_edges(a.rect), _rect_edges(b.rect)]).rect
+    label, snapped = snap_aspect(_display_aspect(union, info))
+    return RefinedSegment(
+        start=a.start,
+        end=b.end,
+        rect=union,
+        aspect=round(_display_aspect(union, info), 3),
+        preset=label if snapped else None,
+        confidence=min(a.confidence, b.confidence),
+        verified=True,
+        flags=tuple(dict.fromkeys([*a.flags, *b.flags, "merged_uncertain"])),
+    )
+
+
+def settle(
+    segments: list[RefinedSegment], boundaries: list[RefinedBoundary], info: VideoInfo
+) -> tuple[list[RefinedSegment], list[RefinedBoundary], int]:
+    """Never write down a change that could not be pinned down.
+
+    A boundary the refinement could not resolve (low confidence, or no exact frame), one that starts before the
+    previous one has finished, one that leaves a segment of no length, and a segment whose picture could not be read
+    are each folded into their neighbour over the larger of the two rectangles. The timeline then shows a little
+    more black than strictly needed in that stretch and never a picture too big for the screen; a file the analyzer
+    understands less well simply carries fewer, wider segments. Returns the segments, boundaries and how many
+    merges were made.
+    """
+    segs, bounds = list(segments), list(boundaries)
+    merges = 0
+
+    def bad(i: int) -> bool:
+        b = bounds[i]
+        if not _trusted(b):
+            return True
+        if i == 0 and b.t_start <= segs[0].start + EPSILON:
+            return True
+        if i > 0 and b.t_start <= bounds[i - 1].t + EPSILON:
+            return True
+        return i == len(bounds) - 1 and segs[-1].end <= b.t + EPSILON
+
+    while True:
+        k = next((i for i in range(len(bounds)) if bad(i)), None)
+        if k is None:
+            break
+        segs[k : k + 2] = [_merge_pair(segs[k], segs[k + 1], info)]
+        del bounds[k]
+        merges += 1
+    while len(segs) > 1:
+        k = next((i for i, s in enumerate(segs) if s.verified is False), None)
+        if k is None:
+            break
+        i = k - 1 if k > 0 else 0
+        segs[i : i + 2] = [_merge_pair(segs[i], segs[i + 1], info)]
+        del bounds[i]
+        merges += 1
+    return segs, bounds, merges

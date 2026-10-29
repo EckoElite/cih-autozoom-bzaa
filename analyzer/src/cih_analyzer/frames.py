@@ -65,6 +65,9 @@ class ScanFrame:
     t: float
     edges: Edges | None
     diff: float | None = None
+    mean: float | None = (
+        None  # mean luma of the whole frame on the 8-bit scale (a dark frame cannot be trusted)
+    )
 
 
 def _largest_block(flags: np.ndarray, max_gap: int) -> tuple[int, int] | None:
@@ -250,7 +253,7 @@ def scan_edges(
     _, depth = _luma_dtype(info)
     native = threshold * (1 << (depth - 8))
     shrink = float(1 << (depth - 8))
-    measured: list[tuple[Edges | None, float | None]] = []
+    measured: list[tuple[Edges | None, float | None, float]] = []
     previous: list[np.ndarray] = []
 
     def measure(luma: np.ndarray) -> None:
@@ -261,12 +264,13 @@ def scan_edges(
             b = previous[0][y : y + h : 2, x : x + w : 4].astype(np.int32)
             if a.size:
                 diff = float(np.abs(a - b).mean()) / shrink
-        measured.append((measure_edges(luma, native), diff))
+        mean = float(luma[::8, ::8].mean()) / shrink
+        measured.append((measure_edges(luma, native), diff, mean))
         previous[:] = [luma]
 
     times = _stream_luma(path, info, start, duration, step, measure, timeout)
     frames = []
-    for i, (edges, diff) in enumerate(measured):
+    for i, (edges, diff, mean) in enumerate(measured):
         t = times[i] if i < len(times) else (frames[-1].t + 1 / info.fps if frames else start)
-        frames.append(ScanFrame(t, edges, diff))
+        frames.append(ScanFrame(t, edges, diff, mean))
     return frames

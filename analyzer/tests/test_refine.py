@@ -124,7 +124,9 @@ class TestCuts:
         path = make_video(tmp_path / "subcut.mp4", [Seg(14, SCOPE, boxes=SUBTITLE), Seg(8, WIDE, level=150)])
         _, _, result = analyse(path)
         assert [(b.kind, b.frame) for b in result.boundaries] == [("cut", 350)]
-        assert result.segments[0].rect == SCOPE and "rect_corrected" in result.segments[0].flags
+        # a subtitle that never goes away stretches the crop; the larger rectangle is kept (bars, never spill)
+        x, y, w, h = result.segments[0].rect
+        assert (x, w) == (SCOPE[0], SCOPE[2]) and y <= SCOPE[1] and y + h >= SCOPE[1] + SCOPE[3]
 
     def test_a_short_real_segment_is_confirmed_and_both_cuts_are_exact(self, tmp_path):
         path = make_video(tmp_path / "blip.mp4", [Seg(10, SCOPE), Seg(4, IMAX, level=150), Seg(10, SCOPE)])
@@ -284,14 +286,35 @@ class TestRamps:
 
 @NEEDS_FFMPEG
 class TestHardCases:
-    def test_a_fade_through_black_hides_the_cut_and_it_is_placed_at_the_scene_change(self, tmp_path):
+    def test_a_fade_through_black_hides_the_cut_so_the_boundary_is_not_pinned_down_and_the_timeline_stays_safe(
+        self, tmp_path
+    ):
         segs = [Seg(8, SCOPE), Seg(2, SCOPE, level=16), Seg(2, WIDE, level=16), Seg(8, WIDE, level=150)]
         path = make_video(tmp_path / "fade.mp4", segs)
+        info = probe_video(path)
+        # the window itself can say only "somewhere in the black stretch" and says so
+        boundary = refine_boundary(
+            path, info, BoundaryWindow(7.0, 12.0), SCOPE, WIDE, floor=0.0, ceiling=20.0
+        )
+        assert boundary.kind == "cut" and 200 <= boundary.frame <= 300
+        assert "boundary_in_unreadable_gap" in boundary.flags and boundary.confidence < 0.7
+        # and the file as a whole is therefore written as one wide segment, not as a guess
         _, _, result = analyse(path)
-        (boundary,) = result.boundaries
-        assert boundary.kind == "cut"
-        assert 200 <= boundary.frame <= 300  # somewhere in the black stretch, nothing in it can say more
-        assert "boundary_in_unreadable_gap" in boundary.flags and boundary.confidence < 1.0
+        assert result.boundaries == () and "uncertain_merged" in result.flags
+        (segment,) = result.segments
+        assert segment.rect == WIDE and segment.preset == 16 / 9 and "merged_uncertain" in segment.flags
+
+    def test_a_dark_fade_in_does_not_become_a_false_opening_segment(self, tmp_path):
+        # a 4:3 picture whose first seconds are almost black with one bright patch (the Foreigner case)
+        four_three = rect_for_ratio(4 / 3, W, H)
+        patch = ((four_three[0] + 60, 120, 140, 120, 150),)
+        segs = [Seg(4, four_three, level=17, boxes=patch), Seg(24, four_three, level=110)]
+        path = make_video(tmp_path / "fadein.mp4", segs)
+        _, _, result = analyse(path)
+        assert result.boundaries == () and len(result.segments) == 1
+        x, y, w, h = result.segments[0].rect
+        assert x <= four_three[0] + 4 and x + w >= four_three[0] + four_three[2] - 4  # the whole 4:3 picture
+        assert result.segments[0].preset == 4 / 3
 
     def test_unresolvable_boundary_is_reported_not_guessed(self, tmp_path):
         path = make_video(tmp_path / "plain.mp4", [Seg(8, SCOPE), Seg(8, SCOPE)])
