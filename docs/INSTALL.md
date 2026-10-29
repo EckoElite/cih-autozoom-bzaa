@@ -30,12 +30,15 @@ never part of the template.
 
 ## 2. Add the container
 
-**Option A: from the template (preferred).**
+**Option A: from the template (preferred).** Unraid 7.2.4 has no **Template repositories** setting under **Settings**,
+**Docker** (reported by the user, 2026-10-29), so put the template file where Unraid keeps custom templates:
 
-1. Unraid web UI, **Settings**, **Docker**, switch to the **Advanced View** (top right).
-2. Under **Template repositories** add `https://github.com/EckoElite/cih-autozoom-bzaa` and save.
-3. **Docker** tab, **Add Container**, open the **Template** drop-down and pick **cih-analyzer** (it is listed under the
-   user templates). The form fills in. This route has not yet been tried on your server; if the template does not
+1. In the Unraid web UI open the terminal (the **`>_`** icon at the top right).
+2. Paste, as one line, and press Enter:
+   `wget -O /boot/config/plugins/dockerMan/templates-user/my-cih-analyzer.xml https://raw.githubusercontent.com/EckoElite/cih-autozoom-bzaa/main/unraid/cih-analyzer.xml`
+   (it only downloads this repository's template file).
+3. **Docker** tab, **Add Container**, open the **Template** drop-down and pick **my-cih-analyzer** under the user
+   templates. The form fills in. This route has not yet been tried on a real Unraid server; if the template does not
    appear, use option B.
 
 **Option B: by hand.** **Docker** tab, **Add Container**, and fill in the fields as below. Click **Add another Path,
