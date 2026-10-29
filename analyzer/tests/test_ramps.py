@@ -160,6 +160,54 @@ def test_sides_that_move_are_tracked_too():
     assert 0 < result.ramp[10].fitted.left < 80
 
 
+FULL = Edges(top=46, bottom=314, left=0, right=640)
+INSET = Edges(top=100, bottom=260, left=120, right=520)
+
+
+def lerp(a, b, k, n):
+    return Edges(
+        *(
+            round(getattr(a, f) + (getattr(b, f) - getattr(a, f)) * k / n)
+            for f in ("top", "bottom", "left", "right")
+        )
+    )
+
+
+def opening_frames(*, before=30, ramp=60, after=30, flashes=(), diffs=None):
+    """The same picture, a cut to a small inset that grows back to full size, then the same picture again."""
+    edges = [FULL] * before + [lerp(INSET, FULL, k, ramp) for k in range(ramp)] + [FULL] * after
+    for i in flashes:
+        edges[i] = Edges(top=10, bottom=350, left=5, right=635)  # a flash frame read at the wrong place
+    return [ScanFrame(i / FPS, e, None if diffs is None else diffs[i]) for i, e in enumerate(edges)]
+
+
+def test_a_cut_to_a_small_inset_that_grows_back_is_a_ramp_after_the_cut():
+    diffs = [0.1] * 120
+    diffs[30] = 45.0
+    result = analyze_transition(opening_frames(diffs=diffs), FULL, FULL, FPS)
+    assert result.kind == "ramp" and "ramp_after_cut" in result.flags
+    assert (result.ramp_start, result.first_new, len(result.ramp)) == (30, 90, 60)
+    assert result.scene_cut is True
+    assert max(abs(result.ramp[0].fitted.left - 120), abs(result.ramp[0].fitted.top - 100)) <= 2
+    lefts = [f.fitted.left for f in result.ramp]
+    assert all(a > b for a, b in zip(lefts, lefts[1:], strict=False))
+
+
+def test_flash_frames_inside_a_ramp_are_set_aside_and_do_not_bend_the_fit():
+    result = analyze_transition(opening_frames(flashes=(50, 51)), FULL, FULL, FPS)
+    assert result.kind == "ramp"
+    flashed = [f for f in result.ramp if not f.readable]
+    assert [f.f for f in flashed] == [50, 51]
+    for f, k in zip(result.ramp, range(60), strict=True):
+        assert abs(f.fitted.left - lerp(INSET, FULL, k, 60).left) <= 2.0
+
+
+def test_a_subtitle_that_touches_the_picture_and_vanishes_is_not_a_ramp():
+    touching = Edges(top=46, bottom=330, left=0, right=640)  # the picture block grew to take in a subtitle
+    frames = [ScanFrame(i / FPS, touching if 30 <= i < 60 else FULL) for i in range(90)]
+    assert analyze_transition(frames, FULL, FULL, FPS).kind == "none"
+
+
 def test_edges_that_barely_differ_between_the_states_are_not_tracked():
     near = Edges(top=2, bottom=358, left=0, right=640)
     assert analyze_transition(frames_for([2] * 30), near, NEW, FPS, RampParams(min_move_px=6)).kind == "none"

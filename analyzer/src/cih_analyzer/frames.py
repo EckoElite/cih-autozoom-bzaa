@@ -224,8 +224,11 @@ def matte_threshold(
     info: VideoInfo,
     samples: list[tuple[float, tuple[int, int, int, int]]],
 ) -> float:
-    """Edge threshold (8-bit scale) for a stretch of the file, just above the noisiest matte sampled."""
-    return threshold_from(matte_levels(path, info, samples))
+    """Edge threshold (8-bit scale) for a stretch of the file, from the cleanest matte sampled. A rectangle that is
+    too small (a ramp's coarse rectangle, say) puts real picture in its "matte" and raises that sample's level, so
+    the lowest level wins."""
+    known = [v for v in matte_levels(path, info, samples) if v is not None]
+    return threshold_from([min(known)] if known else [])
 
 
 def scan_edges(

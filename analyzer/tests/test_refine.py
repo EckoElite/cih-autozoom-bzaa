@@ -202,6 +202,63 @@ class TestRamps:
         assert boundary.ramp[0].f == 200 + start and boundary.frame == 200 + end
         assert len(boundary.ramp) > 300
 
+    def test_opening_that_cuts_to_a_small_window_and_grows_back_is_one_ramp_after_the_cut(self, tmp_path):
+        full = rect_for_ratio(1.85, W, H)
+        inset = (160, 80, 320, 200)
+
+        def growing(i, frames=250):  # 10 s: the window grows from `inset` to the full 1.85 picture
+            return tuple(
+                2 * round((a + (b - a) * i / (frames - 1)) / 2) for a, b in zip(inset, SCOPE, strict=True)
+            )
+
+        segs = [Seg(2, full, level=110), Seg(10, growing, level=150), Seg(8, SCOPE, level=110)]
+        path = make_video(tmp_path / "opening.mp4", segs, keyint=12)
+        _, _, result = analyse(path, scan={"min_interval_s": 0.5})
+        (boundary,) = result.boundaries
+        assert (
+            boundary.kind == "ramp"
+            and "ramp_after_cut" in boundary.flags
+            and "low_confidence" not in boundary.flags
+        )
+        assert boundary.t_start == pytest.approx(2.0, abs=0.04) and boundary.scene_cut is True
+        assert boundary.ramp[0].f == 50 and abs(boundary.frame - 300) <= 3
+        assert result.segments[0].rect == full and result.segments[-1].rect == SCOPE
+        assert result.segments[0].end == pytest.approx(2.0, abs=0.04)
+        # the stored curve starts at the inset, not at the old picture, and never jumps
+        assert (
+            abs(boundary.ramp[0].fitted.left - inset[0]) <= 2
+            and abs(boundary.ramp[0].fitted.top - inset[1]) <= 2
+        )
+        lefts = [f.fitted.left for f in boundary.ramp]
+        assert all(a > b for a, b in zip(lefts, lefts[1:], strict=False))
+
+    @pytest.mark.xfail(
+        strict=True, reason="known gap (DD21): the coarse pass labels by ratio and sees no change here"
+    )
+    def test_a_window_that_grows_back_to_the_same_ratio_is_found(self, tmp_path):
+        full = rect_for_ratio(1.85, W, H)
+        inset = (160, 80, 320, 200)
+
+        def growing(i, frames=250):
+            return tuple(
+                2 * round((a + (b - a) * i / (frames - 1)) / 2) for a, b in zip(inset, full, strict=True)
+            )
+
+        segs = [Seg(2, full, level=110), Seg(10, growing, level=150), Seg(8, full, level=110)]
+        path = make_video(tmp_path / "same.mp4", segs, keyint=12)
+        _, _, result = analyse(path, scan={"min_interval_s": 0.5})
+        assert [b.kind for b in result.boundaries] == ["ramp"]
+
+    def test_edge_threshold_ignores_a_rectangle_that_contains_picture(self, tmp_path):
+        from cih_analyzer.frames import matte_threshold
+
+        path = make_video(tmp_path / "scope.mp4", [Seg(4, SCOPE, level=150)])
+        info = probe_video(path)
+        small = (200, 150, 240, 60)  # far too small: the "matte" outside it is nearly all picture
+        good = matte_threshold(path, info, [(2.0, SCOPE)])
+        assert good == pytest.approx(19.0, abs=1.5)
+        assert matte_threshold(path, info, [(2.0, small), (2.5, SCOPE)]) == good  # the cleanest sample wins
+
     def test_ramp_tracks_a_matte_that_also_moves_at_the_sides(self, tmp_path):
         four_three = rect_for_ratio(4 / 3, W, H)
 

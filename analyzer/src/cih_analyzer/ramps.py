@@ -19,7 +19,7 @@ monotone curve to the measurements. From that:
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from .frames import Edges, ScanFrame
@@ -41,8 +41,11 @@ class RampParams:
     )
     min_move_px: float = 6.0  # an edge that differs by less between the two states is not tracked
     min_ramp_frames: int = 3
+    jump_px: float = 6.0  # an edge that moves this far between consecutive frames jumped, it did not ease
     fit_tolerance_px: float = 2.0
     median_window: int = 5
+    outlier_window: int = 9
+    outlier_px: float = 8.0
     max_unreadable_share: float = 0.25
 
 
@@ -155,9 +158,28 @@ def _isotonic_series(values: list[float | None]) -> list[float | None]:
     return out
 
 
-def _fit_edge(raw: list[float | None], a: float, b: float, tol: float) -> tuple[list[float], bool]:
-    """Fitted values for one moving edge over the ramp frames, and whether they are within `tol` of every
-    readable measurement. `a` and `b` are the edge before and after; they anchor both ends."""
+def _reject_outliers(raw: list[float | None], window: int, tol: float) -> list[float | None]:
+    """Blank out measurements that sit more than `tol` pixels from the running median of their neighbours. In a
+    monotone sequence the median is the middle value, so a real ramp is never touched, while a single flash or
+    dark frame (an edge read at the wrong place) would drag a least-squares monotone fit far off."""
+    half = window // 2
+    out: list[float | None] = []
+    for i, v in enumerate(raw):
+        if v is None:
+            out.append(None)
+            continue
+        near = [x for x in raw[max(0, i - half) : i + half + 1] if x is not None]
+        out.append(v if abs(v - statistics.median(near)) <= tol else None)
+    return out
+
+
+def _fit_edge(
+    raw: list[float | None], a: float, b: float, tol: float, max_misfit: float = 0.03
+) -> tuple[list[float], bool, list[int]]:
+    """Fitted values for one moving edge over the ramp frames, whether they are within `tol` of the readable
+    measurements, and which measurements are the exceptions. A few exceptions (at most `max_misfit` of the readable
+    frames) are tolerated and reported as misreads; more than that makes the fit not ok. `a` and `b` are the edge
+    before and after; they anchor both ends."""
     n = len(raw)
     sign = 1.0 if b > a else -1.0
     span = abs(b - a)
@@ -188,15 +210,18 @@ def _fit_edge(raw: list[float | None], a: float, b: float, tol: float) -> tuple[
             out[i] = min(out[i], (out[i + 1] if i < n - 1 else span) - eps)
         return out
 
-    chosen, ok = dense, False
+    def misfits(candidate: list[float]) -> list[int]:
+        return [i for i, c in enumerate(candidate) if u[i] is not None and abs(c - u[i]) > tol]  # type: ignore[operator]
+
+    allowed = int(max_misfit * len(idx))
+    chosen, bad, ok = smooth(1), [], False
     for window in SMOOTHING_WINDOWS:
         candidate = smooth(window)
-        if all(abs(c - u[i]) <= tol for i, c in enumerate(candidate) if u[i] is not None):  # type: ignore[operator]
+        bad = misfits(candidate)
+        if len(bad) <= allowed:
             chosen, ok = candidate, True
             break
-    else:
-        chosen = smooth(1)
-    return [a + sign * c for c in chosen], ok
+    return [a + sign * c for c in chosen], ok, (bad if ok else [])
 
 
 def _last_old_first_new(qbar: list[float | None]) -> tuple[int | None, int | None]:
@@ -223,6 +248,37 @@ def _scene_cut(frames: list[ScanFrame], at: int) -> bool | None:
     return here >= max(SCENE_CUT_MIN_DIFF, SCENE_CUT_RATIO * baseline)
 
 
+def _excursion_start(frames: list[ScanFrame], old: Edges, new: Edges, params: RampParams) -> int | None:
+    """Index of the first frame after a jump to a picture that is neither `old` nor `new` nor between them, when
+    that picture then eases gradually into `new` (a cut to a small inset that grows back to full size, as in a film
+    opening). A subtitle that touches the picture also leaves the box, but it vanishes with a jump, not gradually."""
+    box = {}
+    for n in EDGE_NAMES:
+        a, b = getattr(old, n), getattr(new, n)
+        margin = max(3.0, 0.05 * abs(a - b))
+        box[n] = (min(a, b) - margin, max(a, b) + margin)
+
+    def outside(e: Edges) -> bool:
+        return any(not box[n][0] <= getattr(e, n) <= box[n][1] for n in EDGE_NAMES)
+
+    def gap(a: Edges, b: Edges) -> float:
+        return max(abs(getattr(a, n) - getattr(b, n)) for n in EDGE_NAMES)
+
+    readable = [(i, f.edges) for i, f in enumerate(frames) if f.edges is not None]
+    for pos, (i, e) in enumerate(readable):
+        if not outside(e):
+            continue
+        if pos == 0 or gap(readable[pos - 1][1], e) < params.jump_px:
+            return None  # the run does not start with a jump (or starts the window): not this shape
+        end = pos
+        while end + 1 < len(readable) and outside(readable[end + 1][1]):
+            end += 1
+        if end - pos + 1 < params.min_ramp_frames or end + 1 >= len(readable):
+            return None
+        return i if gap(readable[end][1], readable[end + 1][1]) < params.jump_px else None
+    return None
+
+
 def analyze_transition(
     frames: list[ScanFrame],
     old: Edges,
@@ -230,7 +286,34 @@ def analyze_transition(
     fps: float,
     params: RampParams = RampParams(),  # noqa: B008
 ) -> Transition:
-    """Where and how the picture changes from `old` to `new` edges within `frames`."""
+    """Where and how the picture changes from `old` to `new` edges within `frames`.
+
+    A window that opens on `old`, jumps to some other picture and then eases into `new` is read as a ramp that
+    starts at the jump (flag `ramp_after_cut`), whose first frame is the first frame after the jump.
+    """
+    jump = _excursion_start(frames, old, new, params)
+    if jump is not None and frames[jump].edges is not None:
+        inner = _analyze(frames[jump:], frames[jump].edges, new, fps, params, from_cut=True)
+        if inner.kind == "ramp":
+            return replace(
+                inner,
+                first_new=inner.first_new + jump,
+                ramp_start=jump,
+                scene_cut=_scene_cut(frames, jump),
+                flags=(*inner.flags, "ramp_after_cut"),
+            )
+    return _analyze(frames, old, new, fps, params)
+
+
+def _analyze(
+    frames: list[ScanFrame],
+    old: Edges,
+    new: Edges,
+    fps: float,
+    params: RampParams,
+    *,
+    from_cut: bool = False,
+) -> Transition:
     names = [n for n in EDGE_NAMES if abs(getattr(new, n) - getattr(old, n)) >= params.min_move_px]
     if not names or not frames:
         return Transition("none", 0, flags=("no_change",), confidence=0.0)
@@ -243,6 +326,8 @@ def analyze_transition(
         vals = [q[n][i] for n in names if q[n][i] is not None]
         qbar.append(sum(vals) / len(vals) if vals else None)  # type: ignore[arg-type]
     last_old, first_new = _last_old_first_new(qbar)
+    if from_cut and first_new is not None:
+        last_old = -1  # the first frame already belongs to the ramp: there is no old state before it
     flags: list[str] = []
     if last_old is None or first_new is None:
         return Transition(
@@ -285,23 +370,30 @@ def _ramp(
     span = frames[start:end]
     fitted: dict[str, list[float]] = {}
     ok = True
+    misread = [
+        f.edges is None for f in span
+    ]  # unreadable, or an outlier among its neighbours (a flash frame)
     for n in EDGE_NAMES:
         a, b = getattr(old, n), getattr(new, n)
         if n in names:
             raw = [None if f.edges is None else getattr(f.edges, n) for f in span]
-            fitted[n], good = _fit_edge(raw, a, b, params.fit_tolerance_px)
+            kept = _reject_outliers(raw, params.outlier_window, params.outlier_px)
+            misread = [m or (r is not None and k is None) for m, r, k in zip(misread, raw, kept, strict=True)]
+            fitted[n], good, exceptions = _fit_edge(kept, a, b, params.fit_tolerance_px)
+            for i in exceptions:
+                misread[i] = True
             ok = ok and good
         else:
             fitted[n] = [(a + b) / 2] * len(span)
     first_frame = round(span[0].t * fps)
-    unreadable = sum(1 for f in span if f.edges is None)
+    unreadable = sum(misread)
     out = tuple(
         FitFrame(
             f=first_frame + k,
             t=f.t,
             fitted=Edges(**{n: fitted[n][k] for n in EDGE_NAMES}),
             raw=f.edges,
-            readable=f.edges is not None,
+            readable=not misread[k],
         )
         for k, f in enumerate(span)
     )

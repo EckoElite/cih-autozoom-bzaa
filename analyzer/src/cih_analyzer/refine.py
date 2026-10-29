@@ -226,14 +226,17 @@ def refine_boundary(
     *,
     floor: float = 0.0,
     ceiling: float | None = None,
+    threshold: float | None = None,
 ) -> RefinedBoundary:
     """The exact frame (or ramp) where the picture goes from `old_rect` to `new_rect` between window.lo and window.hi.
 
     `floor` and `ceiling` bound how far the decoded window may grow: the first sample of the old segment and the
-    last sample of the new one, which the coarse pass saw at their ratios.
+    last sample of the new one, which the coarse pass saw at their ratios. `threshold` (8-bit scale) overrides the
+    edge threshold, which is otherwise calibrated on the matte outside the two rectangles.
     """
     ceiling = info.duration if ceiling is None else ceiling
-    threshold = matte_threshold(path, info, [(window.lo, old_rect), (window.hi, new_rect)])
+    if threshold is None:
+        threshold = matte_threshold(path, info, [(window.lo, old_rect), (window.hi, new_rect)])
     t0, t1 = max(floor, window.lo - params.pad_s), min(ceiling, window.hi + params.pad_s)
     if t1 - t0 > params.stride_over_s:
         t0, t1 = _narrow(path, info, t0, t1, old_rect, new_rect, threshold, params)
@@ -286,9 +289,9 @@ def refine_boundary(
             "cut", t, round(t * info.fps), t, None, old_ref, new_ref, confidence=0.0, flags=tuple(flags)
         )
     t_new = frames[change.first_new].t
-    confidence = change.confidence * (
-        0.7 if {"unstable_before", "unstable_after", "reference_mismatch"} & set(flags) else 1.0
-    )
+    # steady stretches at both ends that disagree with the coarse rectangles are a coarse error (a ramp can look
+    # like a segment there), worth a flag but no loss of confidence; stretches that never settle are
+    confidence = change.confidence * (0.7 if {"unstable_before", "unstable_after"} & set(flags) else 1.0)
     t_start = frames[change.ramp_start].t if change.ramp_start is not None else t_new
     return RefinedBoundary(
         kind="ramp" if change.kind == "ramp" else "cut",
@@ -408,7 +411,17 @@ def refine(
         floor = boundaries[k - 1].hi if k > 0 else 0.0
         ceiling = boundaries[k + 1].lo if k + 1 < len(boundaries) else segments[-1].end
         refined.append(
-            refine_boundary(path, info, window, rects[k], rects[k + 1], params, floor=floor, ceiling=ceiling)
+            refine_boundary(
+                path,
+                info,
+                window,
+                rects[k],
+                rects[k + 1],
+                params,
+                floor=floor,
+                ceiling=ceiling,
+                threshold=threshold,
+            )  # fmt: skip
         )
 
     # 4. segments on the exact boundary times
@@ -436,7 +449,10 @@ def refine(
                 None,
             )
             if ref is not None:
+                # a steady stretch of at least a second beside a confident boundary stands in for the probes
                 rect = ref.rect
+                verified = True
+                flags = [f for f in flags if f != "unreadable"]
                 flags.append("rect_from_boundary")
         if any(seg.start - EPSILON <= c <= seg.end + EPSILON for c in corrected):
             flags.append("rect_corrected")
