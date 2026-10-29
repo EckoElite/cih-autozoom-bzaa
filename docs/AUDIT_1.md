@@ -195,6 +195,15 @@ No requirement is missing from the design, and none of the ten lessons is repeat
 | DD15 | Keep `cropdetect` limits per stream, expressed as fractions of the luma scale, **above the black level** (about 0.063 for limited range in 8 and 10 bits); default 0.094. Corrected in slice 2: the first draft said 0.02 to 0.1 | Below 0.063 nothing counts as black; at 0.2 dark picture content produces false crops |
 | DD16 | Take the display ratio from the container's display aspect ratio (SAR applied) for the fallback | The 2:1 container gives the right answer with no analysis |
 
+**Added during Phase 4 slice 3 (2026-10-28), from building and testing the refinement pass:**
+
+| ID | Change | Why |
+|---|---|---|
+| DD17 | `numpy` (pinned 2.5.4) is a runtime dependency | Full-resolution edge measurement needs array operations; doing it in ffmpeg filters cannot give both edge positions and a frame-to-frame scene-change score in one pass |
+| DD18 | Picture edges are found against a threshold just above the **measured matte noise** (99th percentile of the matte plus 2, clamped to 18 to 32 on the 8-bit scale), as the largest contiguous block of rows and of columns; not against the coarse pass's fixed limit | A dim picture a few levels above black is still found; a subtitle a few rows from the picture falls outside the block. Segment checks use the lowest matte level across all segments, so a segment under suspicion cannot raise the bar it is judged by |
+| DD19 | A segment's probes can **confirm** it, **refute** it (fold into the neighbour they match) or **correct** its rectangle (they agree with each other, not with the coarse crop). A decoded boundary window that does not end in steady picture (no drift over a second) is widened, up to 24 s a side | A permanent subtitle makes a wrong coarse crop; a slow ramp can look steady for a second inside a pixel tolerance, so steadiness also checks drift |
+| DD20 | **Known gap, found on *Scott Pilgrim*:** a ramp whose opening frames are dark (picture sides under the matte threshold) is mis-measured at its start and flagged `low_confidence`. The timeline carries the flag; the Phase 5 player must decide what to do with a low-confidence ramp (suggested: hold the neighbouring segment's zoom, never guess) | Real example in `samples/`; see `PROGRESS.md` slice 3 findings. Open |
+
 **R8 after the gate:** the Gap narrows. An HDR10+ sample exists; profile 5 is out of scope; interlaced is accepted as untested. The remaining R8 work is the planned synthetic fixtures.
 
 **Verdict after the gate:** all five gate items are answered. Six Gaps remain open (section 8, items 1 to 6, with item 1 now reduced to "interlaced and profile 5 are accepted as untested"). **Phase 4 may start.**
