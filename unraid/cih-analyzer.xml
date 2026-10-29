@@ -32,7 +32,7 @@
   <Config Name="Library: Other 2" Target="/media/other2" Default="" Mode="ro" Description="Read-only." Type="Path" Display="advanced" Required="false" Mask="false"/>
   <Config Name="Library: Other 3" Target="/media/other3" Default="" Mode="ro" Description="Read-only." Type="Path" Display="advanced" Required="false" Mask="false"/>
 
-  <Config Name="PATH_MAP" Target="PATH_MAP" Default="/media/musicvideos|/musicvideos|/mnt/user/media/Music Videos" Mode="" Description="Equivalent names for the same folder, one rule per ;  and aliases separated by |  The first name is the path inside this container. Add Plex's path for each library and, if useful, the Unraid path. This is how a Plex path finds its timeline." Type="Variable" Display="always" Required="true" Mask="false">/media/musicvideos|/musicvideos|/mnt/user/media/Music Videos</Config>
+  <Config Name="PATH_MAP" Target="PATH_MAP" Default="" Mode="" Description="Type this in yourself (a default is not used because Unraid turns a | in a default into a drop-down). Equivalent names for the same folder: one rule per library, rules separated by ; and the names inside a rule separated by | . The first name is the path inside this container, then Plex's path for the library, then the Unraid path. Example: /media/musicvideos|/musicvideos|/mnt/user/media/Music Videos" Type="Variable" Display="always" Required="true" Mask="false"/>
   <Config Name="MEDIA_ROOTS" Target="MEDIA_ROOTS" Default="/media" Mode="" Description="Folders to scan, separated by ;  Everything mounted under /media is scanned." Type="Variable" Display="advanced" Required="true" Mask="false">/media</Config>
   <Config Name="PLEX_URL" Target="PLEX_URL" Default="" Mode="" Description="For example http://192.168.1.10:32400  Leave empty to run without Plex." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="PLEX_TOKEN" Target="PLEX_TOKEN" Default="" Mode="" Description="Your Plex token. Only read from here; never stored in the image or written to logs." Type="Variable" Display="always" Required="false" Mask="true"/>
@@ -47,5 +47,4 @@
   <Config Name="PLEX_INTERVAL" Target="PLEX_INTERVAL" Default="900" Mode="" Description="Seconds between reads of Plex's libraries." Type="Variable" Display="advanced" Required="false" Mask="false">900</Config>
   <Config Name="LOG_LEVEL" Target="LOG_LEVEL" Default="INFO" Mode="" Description="DEBUG, INFO, WARNING or ERROR." Type="Variable" Display="advanced" Required="false" Mask="false">INFO</Config>
   <Config Name="TZ" Target="TZ" Default="America/New_York" Mode="" Description="Time zone, used for quiet hours and for the times on the status page." Type="Variable" Display="advanced" Required="false" Mask="false">America/New_York</Config>
-  <Config Name="GPU (reserved)" Target="/dev/dri" Default="" Mode="" Description="Reserved for hardware decoding; not used yet. Leave empty." Type="Device" Display="advanced" Required="false" Mask="false"/>
 </Container>
