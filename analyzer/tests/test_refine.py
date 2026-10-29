@@ -332,11 +332,15 @@ class TestHardCases:
         )
         assert boundary.kind == "cut" and 200 <= boundary.frame <= 300
         assert "boundary_in_unreadable_gap" in boundary.flags and boundary.confidence < 0.7
-        # and the file as a whole is therefore written as one wide segment, not as a guess
+        # and the file as a whole puts the change at the early end of that stretch, where the larger picture is on
+        # screen throughout, not at a guess: the wide picture is up by the time the true change (10 s) arrives
         _, _, result = analyse(path)
-        assert result.boundaries == () and "uncertain_merged" in result.flags
-        (segment,) = result.segments
-        assert segment.rect == WIDE and segment.preset == 16 / 9 and "merged_uncertain" in segment.flags
+        scope, wide = result.segments
+        assert "position_uncertain" in result.flags and "uncertain_merged" not in result.flags
+        assert scope.rect == SCOPE and wide.rect == WIDE and wide.preset == 16 / 9
+        assert scope.end == wide.start <= 10.0
+        (boundary,) = result.boundaries
+        assert "placed_conservatively" in boundary.flags
 
     def test_a_dark_fade_in_does_not_become_a_false_opening_segment(self, tmp_path):
         # a 4:3 picture whose first seconds are almost black with one bright patch (the Foreigner case)

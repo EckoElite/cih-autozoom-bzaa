@@ -16,9 +16,9 @@ def seg(start, end, rect, *, verified=True, preset=None, confidence=1.0, flags=(
     return RefinedSegment(start, end, rect, round(rect[2] / rect[3], 3), preset, confidence, verified, flags)
 
 
-def cut(t, *, confidence=1.0, flags=(), t_start=None):
+def cut(t, *, confidence=1.0, flags=(), t_start=None, window=None):
     return RefinedBoundary("cut", t, round(t * 24), t if t_start is None else t_start, None, None, None,
-                           confidence=confidence, flags=flags)  # fmt: skip
+                           confidence=confidence, flags=flags, window=window)  # fmt: skip
 
 
 def test_trusted_boundaries_pass_through_untouched():
@@ -137,6 +137,20 @@ def test_a_ramp_that_ends_somewhere_the_next_segment_is_not_is_merged():
     assert merges == 1 and out_boundaries == []
 
 
+def test_a_ramp_that_stops_short_of_the_next_picture_is_placed_not_merged():
+    # a 1.4 s dissolve from a scope shot to a full-frame one reads as a ramp that never reaches the full frame
+    frames = [fit((0, 276 - 10 * k, 3840, 1608 + 20 * k), k) for k in range(10)]
+    segments = [seg(0, 100, SCOPE), seg(102, 200, WIDE)]
+    boundary = opening_ramp(frames, t_start=100.0, t=101.4)
+    boundary = RefinedBoundary(**{**boundary.__dict__, "window": (99.0, 102.0)})
+    out_segments, out_boundaries, merges = settle(segments, [boundary], INFO)
+    assert merges == 0 and [s.rect for s in out_segments] == [SCOPE, WIDE]
+    assert (
+        out_segments[0].end == out_segments[1].start == 99.0
+    )  # the picture grows, so the larger one starts early
+    assert out_boundaries[0].kind == "cut" and out_boundaries[0].ramp == ()
+
+
 def test_a_ramp_that_barely_moves_the_picture_is_not_worth_following():
     frames = [fit((0, 276 + k, 3840, 1608 - 2 * k), k) for k in range(6)]  # a few pixels in all
     segments = [seg(0, 10, SCOPE), seg(14, 30, (0, 286, 3840, 1588))]
@@ -156,6 +170,45 @@ def test_a_cut_between_nearly_identical_pictures_is_not_worth_a_zoom_change():
     assert merges == 1 and out_boundaries == [] and out_segments[0].rect == a  # the larger of the two
     _, kept, merges = settle([seg(0, 10, SCOPE), seg(10, 20, WIDE)], [cut(10.0)], INFO)
     assert merges == 0 and len(kept) == 1  # 2.39 against 16:9 is a real change
+
+
+def test_an_unsure_cut_between_two_established_pictures_is_placed_not_merged():
+    # the shape Interstellar gave: a scope scene, then a full-frame one, the frame of the change in doubt
+    segments = [seg(0, 88.3, SCOPE), seg(88.3, 108.0, WIDE), seg(108.0, 200, SCOPE)]
+    boundaries = [cut(88.34, confidence=0.6, flags=("blend_frames",), window=(87.8, 89.3)), cut(108.03)]
+    out_segments, out_boundaries, merges = settle(segments, boundaries, INFO)
+    assert merges == 0 and len(out_segments) == 3
+    # the picture grows, so the larger one starts at the early end of the doubt
+    assert (out_segments[0].end, out_segments[1].start) == (87.8, 87.8)
+    assert out_boundaries[0].t == out_boundaries[0].t_start == 87.8
+    assert "placed_conservatively" in out_boundaries[0].flags
+
+
+def test_an_unresolved_cut_to_a_smaller_picture_is_placed_at_the_late_end():
+    segments = [seg(0, 20, WIDE), seg(20, 40, SCOPE)]
+    boundary = cut(20.0, flags=("no_old_state", "unresolved"), confidence=0.0, window=(18.0, 21.5))
+    out_segments, out_boundaries, merges = settle(segments, [boundary], INFO)
+    assert merges == 0 and (out_segments[0].end, out_segments[1].start) == (21.5, 21.5)
+    assert "unresolved" not in out_boundaries[0].flags
+
+
+def test_an_unsure_cut_is_still_merged_when_a_side_was_never_verified():
+    segments = [seg(0, 20, SCOPE), seg(20, 40, WIDE, verified=False)]
+    boundary = cut(20.0, confidence=0.4, window=(19.0, 21.0))
+    assert settle(segments, [boundary], INFO)[2] >= 1
+
+
+def test_an_unsure_cut_between_equivalent_pictures_is_merged_not_placed():
+    a, b = (0, 70, 3840, 2020), (0, 86, 3840, 1988)
+    _, out_boundaries, merges = settle(
+        [seg(0, 10, a), seg(10, 20, b)], [cut(10.0, confidence=0.4, window=(9.0, 11.0))], INFO
+    )
+    assert merges == 1 and out_boundaries == []
+
+
+def test_an_unsure_cut_whose_placement_would_leave_a_sliver_is_merged():
+    boundary = cut(0.6, confidence=0.5, window=(0.2, 0.8))  # the early end leaves the old picture 0.2 s
+    assert settle([seg(0, 0.6, SCOPE), seg(0.6, 40, WIDE)], [boundary], INFO)[2] >= 1
 
 
 def test_a_segment_under_a_second_is_folded_into_its_neighbour():

@@ -201,6 +201,22 @@ The user answered all five items: G1 accept R2 at 1 frame, G2 defer subtitles (R
 
 `docs/AUDIT_1.md` traces R1 to R16, D1 to D8, L1 to L10, the section 10 failure modes and every assumption above. Result: no requirement missing from the design, no lesson repeated, **six Gaps** to close (missing Dolby Vision profile 5 / HDR10+ / interlaced samples; GHCR package visibility; the override button and PM4K's key handling; six missing tests; Kodi's vertical-shift units; a test pattern that stays readable in dim ramps) and **five decisions for the user** (G1 R2 acceptance at 1 frame, G2 defer subtitles, G3 samples, G4 Catching Fire path, G5 wrong zoom for about 0.3 s after a seek or at start). The section 5 math was re-derived independently (`tools/audit_math.py`) and agrees. Read-only findings from PM4K's source and the Shield: PM4K plays through `xbmc.Player`, sets no view mode, resumes by start-then-seek, and hands Kodi the Plex part URL (or a mapped path); the skin's `enableautozoom` is false.
 
+## Test films, first results (2026-10-29, analyzer 0.3.1 on Unraid, 3 workers)
+
+| Film | Analysis time | Result |
+|---|---|---|
+| Interstellar | 3,564 s | 73 segments, 64% of the film at 16:9. **Wrong in places**: see below |
+| Dunkirk | 3,002 s | 26 segments (2.20 and 16:9); 20% of its length in segments under 0.9 confidence. Not frame-checked yet |
+| Avatar: The Way of Water | 1,895 s | One segment at 1.85 (3840x2080). **Frame-checked**: 62 of 64 single frames, spread over the film, measure 1.850 (rows 42 to 2118); the other two are dark frames. So the file really is 1.85 throughout |
+
+**Interstellar defect (verified by frame check and by re-running a local 560 s copy of the file's start).** In 0 to 523 s the timeline said 16:9 throughout, but single frames show 2.397 scope from 0 to about 380 s, with short full-frame shots at about 90 s and 190 s, and 16:9 only from about 390 s. Likewise 4,620 to 5,384 s was written as 16:9 while 18 of 19 frames sampled there are 2.397 (the other is a dark misread). Cause, found by capturing `settle`'s inputs: the coarse pass and the probes were right (11 segments, correct), but `settle` merged a cut it could not place to the frame (confidence 0.60 and 0.00) into its neighbour over the larger rectangle, and the merges then cascaded, together with a 1.4 s dissolve read as a ramp that never reached the full frame. Safe (no spill), but 31% of that film would have shown scope content too small.
+
+**Fix (0.3.2):** a cut or ramp between two verified pictures that differ by at least 3% in zoom is a real change whose *time* is in doubt, not its existence. `settle` now keeps it and places it at the end of its uncertainty window (last coarse sample of the old picture to first of the new) that keeps the larger picture on screen: early when the picture grows, late when it shrinks. Still merged when a side is unverified, the pictures are equivalent, or placing it would leave a sliver under 1 s. The re-run on the same 560 s copy now gives 87.8 s, 108.0 s, 182.0 s, 388.6 s and 523.4 s, matching the frame samples. 284 tests pass. Titles analyzed under 0.3.1 with `uncertain_merged` need re-analysis (patch version: not re-queued automatically).
+
+## Decision (2026-10-29): hybrid analysis
+
+The user chose: batch analysis stays for Movies; TV and everything else are analyzed on demand; **and any movie not yet analyzed when played is also analyzed on demand**, the same as TV. Until the timeline arrives the player shows the R6 fallback (contain the container DAR, 16:9 here). Needs a playhead-first range mode in the analyzer (analyze from the playing position forward, publish partial coverage) and player polling; this is Phase 5 work, not built yet.
+
 ## Next
 
 Answer the gate items in `docs/AUDIT_1.md`, then Phase 4 (analyzer service). Phase 5's first step is a read-only log of what PM4K passes to Kodi on a real title. The Shield shortcut to PM4K stays a deferred to-do (above).

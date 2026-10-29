@@ -222,6 +222,9 @@ No requirement is missing from the design, and none of the ten lessons is repeat
 | DD27 | `ionice -c 3` and `nice -n 19` are each tried once and omitted (with a warning) if the runtime refuses them | A restrictive container must lose the priority, not fail every analysis |
 | DD28 | `SAMPLE_INTERVAL` (global) and `SAMPLE_INTERVALS` (per folder, longest prefix wins) set how often the first pass samples keyframes | The real library has about 40,000 files (the spec assumed 2,000+); TV can be sampled sparsely and movies densely (R12) |
 
+| DD29 | A cut or ramp between two verified pictures (zoom differing by at least 3%) that cannot be pinned to the frame is placed at the safe end of its uncertainty window instead of merging the neighbours; flags `placed_conservatively` (boundary) and `position_uncertain` (file) | Found on Interstellar: merging over the larger rectangle was safe but cascaded and wrote 31% of the film as 16:9. A doubt about *when* now costs at most the width of one coarse window of extra black |
+| DD30 | Hybrid analysis: Movies batch plus on-demand for any unanalyzed title (movie or TV); TV and other libraries on demand only | The full library is about 40,000 files; measured 4K analysis takes 17 to 59 min per film at 3 workers. On-demand needs a playhead-first range mode (Phase 5) and accepts a 16:9 fallback until the timeline arrives (R6, G5) |
+
 R10 status: the template, the install text with the GHCR visibility steps, and the anonymous-pull check are written; the check itself happens after the first publish.
 
 **R8 after the gate:** the Gap narrows. An HDR10+ sample exists; profile 5 is out of scope; interlaced is accepted as untested. The remaining R8 work is the planned synthetic fixtures.

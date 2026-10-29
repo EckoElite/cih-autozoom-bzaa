@@ -65,6 +65,7 @@ class RefinedBoundary:
     ramp: tuple[FitFrame, ...] = ()
     confidence: float = 1.0
     flags: tuple[str, ...] = ()
+    window: tuple[float, float] | None = None  # last coarse sample of the old picture, first of the new one
 
 
 @dataclass(frozen=True)
@@ -289,7 +290,16 @@ def refine_boundary(
     if not frames or old_ref is None or new_ref is None:
         t = window.hi
         return RefinedBoundary(
-            "cut", t, round(t * info.fps), t, None, old_ref, new_ref, confidence=0.0, flags=("unresolved",)
+            "cut",
+            t,
+            round(t * info.fps),
+            t,
+            None,
+            old_ref,
+            new_ref,
+            confidence=0.0,
+            flags=("unresolved",),
+            window=(window.lo, window.hi),
         )
     if not head_ok:
         flags.append("unstable_before")
@@ -305,7 +315,16 @@ def refine_boundary(
         t = window.hi
         flags.append("unresolved")
         return RefinedBoundary(
-            "cut", t, round(t * info.fps), t, None, old_ref, new_ref, confidence=0.0, flags=tuple(flags)
+            "cut",
+            t,
+            round(t * info.fps),
+            t,
+            None,
+            old_ref,
+            new_ref,
+            confidence=0.0,
+            flags=tuple(flags),
+            window=(window.lo, window.hi),
         )
     t_new = frames[change.first_new].t
     # steady stretches at both ends that disagree with the coarse rectangles are a coarse error (a ramp can look
@@ -323,6 +342,7 @@ def refine_boundary(
         ramp=change.ramp,
         confidence=round(confidence, 3),
         flags=tuple(flags),
+        window=(window.lo, window.hi),
     )
 
 
@@ -502,6 +522,8 @@ def refine(
         flags.append("segments_refuted")
     if merged:
         flags.append("uncertain_merged")
+    if any("placed_conservatively" in b.flags for b in refined):
+        flags.append("position_uncertain")
     if len({(s.preset, round(s.aspect, 2) if s.preset is None else 0) for s in out}) > 1:
         flags.append("var")
     if any(b.kind == "ramp" for b in refined):
@@ -533,7 +555,55 @@ def _zoom(rect: Rect, info: VideoInfo) -> float:
 
 
 def _trusted(b: RefinedBoundary) -> bool:
+    if "placed_conservatively" in b.flags:
+        return True
     return b.confidence >= TRUST_CONFIDENCE and "unresolved" not in b.flags
+
+
+def _place_conservatively(
+    segs: list[RefinedSegment], bounds: list[RefinedBoundary], i: int, info: VideoInfo
+) -> bool:
+    """A cut whose exact frame is in doubt, between two pictures that are each well established, is still a real
+    change: only *when* is unknown, and only within the stretch between the last coarse sample of the old picture and
+    the first of the new one. Put it at the end of that stretch that keeps the larger picture on screen throughout
+    (early when the picture grows, late when it shrinks), so the doubt costs a few seconds of extra black at most
+    and never a picture too big for the screen. The same goes for a ramp that does not run from the picture before
+    it to the picture after it (a dissolve between two shots reads like that): the span it covers is the doubt.
+    Returns False when the change cannot be placed that way."""
+    b = bounds[i]
+    before, after = segs[i], segs[i + 1]
+    if b.window is None:
+        return False
+    if b.kind == "ramp":
+        if not b.ramp or not _ramp_not_worth_keeping(b, before, after, info):
+            return False
+    elif _trusted(b):
+        return False
+    if before.verified is not True or after.verified is not True:
+        return False
+    zoom_before, zoom_after = _zoom(before.rect, info), _zoom(after.rect, info)
+    if abs(zoom_before / zoom_after - 1) < EQUIVALENT_ZOOM:
+        return False
+    lo, hi = min(b.window[0], b.t_start), max(b.window[1], b.t)
+    t = lo if zoom_after < zoom_before else hi
+    if t < before.start + MIN_SEGMENT_S or t > after.end - MIN_SEGMENT_S:
+        return False
+    if i > 0 and t <= bounds[i - 1].t + EPSILON:
+        return False
+    if i + 1 < len(bounds) and t >= bounds[i + 1].t_start - EPSILON:
+        return False
+    bounds[i] = replace(
+        b,
+        kind="cut",
+        t=t,
+        frame=round(t * info.fps),
+        t_start=t,
+        ramp=(),
+        flags=(*(f for f in b.flags if f != "unresolved"), "placed_conservatively"),
+    )
+    segs[i] = replace(before, end=t)
+    segs[i + 1] = replace(after, start=t)
+    return True
 
 
 def _ramp_not_worth_keeping(
@@ -583,6 +653,8 @@ def settle(
     """
     segs, bounds = list(segments), list(boundaries)
     merges = 0
+    for i in range(len(bounds)):
+        _place_conservatively(segs, bounds, i, info)
 
     def tiny(i: int) -> bool:
         return len(segs) > 1 and segs[i].end - segs[i].start < MIN_SEGMENT_S
