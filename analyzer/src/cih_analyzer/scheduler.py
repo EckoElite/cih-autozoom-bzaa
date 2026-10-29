@@ -39,6 +39,8 @@ log = logging.getLogger(__name__)
 IDLE_POLL_S = 5.0
 PAUSED_POLL_S = 15.0
 TRANSCODE_CACHE_S = 30.0
+MAX_WORKERS = 16
+WORKERS_META = "workers"
 
 
 @dataclass
@@ -161,6 +163,48 @@ class Scheduler:
         self.last_scan: dict | None = None
         self.last_plex: dict | None = None
         self._scan_lock = threading.Lock()
+        self._workers: dict[int, threading.Thread] = {}
+        self._workers_lock = threading.Lock()
+        self._started = False
+        self._target = self._initial_workers()
+
+    # ---- how many analyses run at once -----------------------------------------------------------------------------
+
+    def _initial_workers(self) -> int:
+        """The count saved from the web page or the API, else the CONCURRENCY setting."""
+        saved = self.store.get_meta(WORKERS_META)
+        if saved is not None:
+            try:
+                return max(1, min(MAX_WORKERS, int(saved)))
+            except ValueError:
+                log.warning("ignoring the saved worker count %r", saved)
+        return max(1, min(MAX_WORKERS, self.settings.concurrency))
+
+    @property
+    def workers(self) -> int:
+        return self._target
+
+    def set_workers(self, count: int) -> int:
+        """Change how many analyses run at once, without stopping any that are running. Raising it starts workers
+        now; lowering it lets the surplus workers finish the file they are on and then stop taking new ones. The
+        count is saved, so it survives a restart and takes the place of the CONCURRENCY setting."""
+        if not 1 <= count <= MAX_WORKERS:
+            raise ValueError(f"the worker count must be from 1 to {MAX_WORKERS}")
+        self.store.set_meta(WORKERS_META, str(count))
+        self._target = count
+        self._spawn_workers()
+        return count
+
+    def _spawn_workers(self) -> None:
+        if self.stop_event.is_set() or not self._started:
+            return
+        with self._workers_lock:
+            for i in range(self._target):
+                thread = self._workers.get(i)
+                if thread is None or not thread.is_alive():
+                    thread = threading.Thread(target=self._worker, args=(i,), name=f"worker-{i}", daemon=True)
+                    self._workers[i] = thread
+                    thread.start()
 
     # ---- throttling ----------------------------------------------------------------------------------------------
 
@@ -245,8 +289,14 @@ class Scheduler:
             self.store.fail(path, "the analysis returned nothing")
         return True
 
-    def _worker(self) -> None:
+    def _worker(self, index: int) -> None:
         while not self.stop_event.is_set():
+            with self._workers_lock:
+                if (
+                    index >= self._target
+                ):  # the count was lowered: leave between files, never in the middle of one
+                    self._workers.pop(index, None)
+                    return
             if self.paused_reason():
                 self.stop_event.wait(PAUSED_POLL_S)
                 continue
@@ -334,27 +384,33 @@ class Scheduler:
                 if self.plex
                 else []
             ),
-            *(
-                threading.Thread(target=self._worker, name=f"worker-{i}")
-                for i in range(self.settings.concurrency)
-            ),
         ]
         for t in threads:
             t.daemon = True
             t.start()
         self._threads = threads
+        self._started = True
+        self._spawn_workers()
 
     def stop(self, timeout: float = 10.0) -> None:
         self.stop_event.set()
-        for t in self._threads:
+        with self._workers_lock:
+            workers = list(self._workers.values())
+        for t in [*self._threads, *workers]:
             t.join(timeout)
         self._threads = []
+        with self._workers_lock:
+            self._workers.clear()
+        self._started = False
 
     def status(self) -> dict:
+        running = [r["path"] for r in self.store.queue(MAX_WORKERS * 4) if r["status"] == "running"]
         return {
             "paused": self.paused_reason(),
-            "workers": self.settings.concurrency,
-            "running": [r["path"] for r in self.store.queue(50) if r["status"] == "running"],
+            "workers": self._target,
+            "workers_env": self.settings.concurrency,
+            "busy": len(running),
+            "running": running,
             "last_scan": self.last_scan,
             "last_plex": self.last_plex,
         }

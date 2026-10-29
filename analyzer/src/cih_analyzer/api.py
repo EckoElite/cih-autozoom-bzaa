@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .config import Settings
 from .pathmap import PathMap, normalize
-from .scheduler import Scheduler
+from .scheduler import MAX_WORKERS, Scheduler
 from .store import PRIORITY_DEMAND, Store
 
 PAGE = Path(__file__).with_name("web") / "index.html"
@@ -43,6 +43,10 @@ class Target(BaseModel):
 class OverrideBody(Target):
     mode: str = Field(pattern="^(preset|disable|clear)$")
     preset: float | None = Field(default=None, gt=0.5, lt=5)
+
+
+class WorkersBody(BaseModel):
+    workers: int = Field(ge=1, le=MAX_WORKERS)
 
 
 def _brief(row: dict[str, Any]) -> dict[str, Any]:
@@ -184,7 +188,9 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
             "plex": {"enabled": settings.plex_enabled, "skipped_sections": list(settings.plex_skip_sections)},
             "media_roots": list(settings.media_roots),
             "settings": {
-                "concurrency": settings.concurrency,
+                "concurrency": scheduler.workers,
+                "concurrency_env": settings.concurrency,
+                "max_workers": MAX_WORKERS,
                 "quiet_hours": [t.strftime("%H:%M") for t in settings.quiet_hours]
                 if settings.quiet_hours
                 else None,
@@ -248,6 +254,12 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
         if not settings.plex_enabled:
             raise HTTPException(409, "Plex is not configured")
         return background(scheduler.plex_now)
+
+    @app.post("/api/v1/concurrency", dependencies=secured)
+    def concurrency(body: WorkersBody) -> dict[str, Any]:
+        """How many files are analysed at once. Raising it starts more now; lowering it stops nothing that is running,
+        the surplus workers just take no new file. Saved across restarts, and wins over the CONCURRENCY setting."""
+        return {"workers": scheduler.set_workers(body.workers), "max_workers": MAX_WORKERS}
 
     @app.post("/api/v1/pause", dependencies=secured)
     def pause() -> dict[str, Any]:

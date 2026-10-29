@@ -206,6 +206,72 @@ def test_threads_scan_run_and_stop_and_a_running_job_survives_a_restart(env):
     assert sched.status()["paused"] is None
 
 
+def wait_for(condition, seconds=10.0):
+    deadline = time.time() + seconds
+    while time.time() < deadline and not condition():
+        time.sleep(0.02)
+    return condition()
+
+
+def test_the_worker_count_changes_while_running_and_never_interrupts_a_job(tmp_path):
+    root = tmp_path / "media"
+    root.mkdir()
+    for i in range(6):
+        (root / f"f{i}.mkv").write_bytes(b"x" * 10)
+    base = str(root).replace("\\", "/")
+    store = Store(tmp_path / "s.sqlite")
+    settings = Settings(config_dir=tmp_path, media_roots=(base,), scan_interval_s=60, concurrency=1)
+    gate, lock = threading.Event(), threading.Lock()
+    started: list[str] = []
+
+    def runner(path, timeout, stop):
+        with lock:
+            started.append(threading.current_thread().name)
+        if len(started) <= 3:
+            gate.wait(10)  # hold the first three jobs open
+        return RunResult(timeline=timeline(path))
+
+    sched = Scheduler(settings, store, PathMap(), runner=runner)
+    sched.scan_now()
+    sched.start()
+    try:
+        assert wait_for(lambda: len(started) == 1) and sched.workers == 1
+        sched.set_workers(3)  # raising it starts workers at once
+        assert wait_for(lambda: len(started) == 3)
+        assert sched.status()["workers"] == 3 and sched.status()["busy"] == 3
+        sched.set_workers(1)  # lowering it interrupts nothing
+        assert sched.status()["busy"] == 3 and store.counts().get("done", 0) == 0
+        gate.set()
+        assert wait_for(lambda: store.counts() == {"done": 6})
+        # the three jobs that were running finished; every job after them ran on the one worker that was kept
+        assert started[3:] == ["worker-0"] * 3
+        assert wait_for(lambda: len(sched._workers) == 1)
+    finally:
+        gate.set()
+        sched.stop(5)
+    # the count is saved: a new scheduler on the same store starts from it, not from CONCURRENCY
+    assert Scheduler(settings, store, PathMap()).workers == 1
+    sched.set_workers(4)
+    assert Scheduler(settings, store, PathMap()).workers == 4
+    store.close()
+
+
+def test_the_worker_count_is_validated_and_does_not_start_workers_before_start(env):
+    sched, store, root, calls = env
+    for bad in (0, -1, 17):
+        with pytest.raises(ValueError, match="1 to 16"):
+            sched.set_workers(bad)
+    assert sched.set_workers(2) == 2 and sched._workers == {} and calls == []
+
+
+def test_a_saved_count_that_is_unreadable_falls_back_to_the_setting(tmp_path):
+    store = Store(tmp_path / "s.sqlite")
+    store.set_meta("workers", "many")
+    settings = Settings(config_dir=tmp_path, media_roots=(), concurrency=3)
+    assert Scheduler(settings, store, PathMap()).workers == 3
+    store.close()
+
+
 def test_workers_stay_idle_while_paused(env):
     sched, store, root, calls = env
     sched.pause()

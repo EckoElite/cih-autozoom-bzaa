@@ -80,6 +80,19 @@ def api(tmp_path):
     store.close()
 
 
+def test_the_worker_count_is_set_and_reported_through_the_api(api):
+    client, store, sched, *_ = api
+    assert client.get("/api/v1/status").json()["settings"]["concurrency"] == 1
+    assert client.post("/api/v1/concurrency", json={"workers": 5}).json() == {"workers": 5, "max_workers": 16}
+    status = client.get("/api/v1/status").json()
+    assert status["scheduler"]["workers"] == 5 and status["settings"]["concurrency"] == 5
+    assert status["settings"]["concurrency_env"] == 1  # what the CONCURRENCY setting said
+    assert store.get_meta("workers") == "5"
+    for bad in (0, 17, "x"):
+        assert client.post("/api/v1/concurrency", json={"workers": bad}).status_code == 422
+    assert sched.workers == 5
+
+
 def test_health_and_the_page_are_served(api):
     client, *_ = api
     body = client.get("/health").json()

@@ -109,7 +109,7 @@ All settings are environment variables; change them by editing the container and
 | `PLEX_URL`, `PLEX_TOKEN` | | Plex server (optional) |
 | `PLEX_SKIP_SECTIONS` | | Plex library titles to ignore; only affects Plex ids, **what is analysed is what you mount** |
 | `API_KEY` | | if set, the API needs it as the `X-Api-Key` header |
-| `CONCURRENCY` | `1` | files analysed at once; each runs at the lowest CPU and disk priority |
+| `CONCURRENCY` | `1` | files analysed at once when the container first starts; each runs at the lowest CPU and disk priority. Change it later on the status page ("Files analysed at once"): raising it starts more now, lowering it lets running files finish and takes no new ones. A count saved there is kept across restarts and wins over this setting |
 | `QUIET_HOURS` | | `HH:MM-HH:MM` local time when analysis pauses |
 | `PAUSE_ON_TRANSCODE` | `1` | pause while Plex transcodes video |
 | `SAMPLE_INTERVAL` | `1` | seconds between sampled keyframes (at least 1) |

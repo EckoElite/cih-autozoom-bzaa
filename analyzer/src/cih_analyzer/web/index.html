@@ -41,6 +41,11 @@
       <button id="pause">Pause</button><button id="resume">Resume</button>
       <button id="scan">Scan media now</button><button id="plex">Sync Plex now</button>
     </div>
+    <div class="row">
+      <label>Files analysed at once <input type="number" id="workers" min="1" max="16" style="width:4.5em"></label>
+      <button id="setworkers">Apply</button>
+      <span class="muted" id="workershint">Raising it starts more now; lowering it lets running files finish and takes no new ones. Saved across restarts.</span>
+    </div>
   </section>
 
   <section>
@@ -118,7 +123,10 @@ async function refresh() {
       c.append(el("div", { className: "card" }, el("b", { textContent: String(s.counts[st] || 0), className: st === "error" && s.counts[st] ? "bad" : "" }), st));
     }
     const sc = s.scheduler;
-    $("sched").textContent = (sc.paused ? "Paused: " + sc.paused + ". " : "Running. ") + sc.workers + " worker(s). " +
+    const wi = $("workers"); wi.max = s.settings.max_workers;
+    if (document.activeElement !== wi) wi.value = sc.workers;
+    $("sched").textContent = (sc.paused ? "Paused: " + sc.paused + ". " : "Running. ") + sc.busy + " of " + sc.workers + " worker(s) busy" +
+      (sc.busy > sc.workers ? " (" + (sc.busy - sc.workers) + " finishing, then stopping)" : "") + ". " +
       (sc.last_scan ? "Last scan " + when(sc.last_scan.at) + " (" + sc.last_scan.seen + " files). " : "") +
       (s.plex.enabled ? (sc.last_plex ? (sc.last_plex.error ? "Plex: " + sc.last_plex.error : "Plex synced " + when(sc.last_plex.at) + " (" + sc.last_plex.matched + " matched).") : "Plex not synced yet.") : "Plex not configured.");
     const q = await json("/api/v1/queue?limit=30");
@@ -199,6 +207,14 @@ $("pause").onclick = async () => { await json("/api/v1/pause", { method: "POST" 
 $("resume").onclick = async () => { await json("/api/v1/resume", { method: "POST" }); refresh(); };
 $("scan").onclick = async () => { await json("/api/v1/scan", { method: "POST" }); note("Scan started"); };
 $("plex").onclick = async () => { try { await json("/api/v1/plex-sync", { method: "POST" }); note("Plex sync started"); } catch (e) { note(e.message, "bad"); } };
+$("setworkers").onclick = async () => {
+  const n = parseInt($("workers").value, 10);
+  try {
+    const r = await json("/api/v1/concurrency", { method: "POST", body: { workers: n } });
+    await refresh();
+    note("Analysing " + r.workers + " file(s) at once");
+  } catch (e) { note("Could not change the count: " + e.message, "bad"); }
+};
 $("reanalyze").onclick = () => current && analyze(current);
 $("ovsave").onclick = async () => {
   if (!current) return;
