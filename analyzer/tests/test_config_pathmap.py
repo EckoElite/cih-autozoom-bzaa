@@ -1,4 +1,4 @@
-﻿"""Settings from the environment and path mapping."""
+"""Settings from the environment and path mapping."""
 
 from datetime import time
 
@@ -125,4 +125,3 @@ def test_quiet_hours_including_a_window_across_midnight():
     day = parse_quiet_hours("18:00-23:00")
     assert in_quiet_hours(day, time(18, 0)) and not in_quiet_hours(day, time(23, 0))
     assert not in_quiet_hours(None, time(12, 0)) and parse_quiet_hours("") is None
-
