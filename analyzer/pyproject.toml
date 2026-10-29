@@ -24,4 +24,6 @@ select = ["E", "F", "I", "B", "UP", "S", "BLE"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S311", "S603", "S607"]
+"tests/*" = ["S101", "S105", "S310", "S311", "S603", "S607"]
+# the only interpolated SQL is a fixed column list and a fixed column name chosen from a constant tuple
+"src/cih_analyzer/store.py" = ["S608"]

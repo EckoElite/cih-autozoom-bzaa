@@ -36,10 +36,33 @@ from .skip import SkipConfig, inspect_file
 
 @dataclass(frozen=True)
 class Analysis:
-    """Exactly one of `timeline` and `skip` is set."""
+    """Exactly one of `timeline` and `skip` is set. `ramp_raw` keeps what was measured on every ramp frame (the
+    timeline stores only the fitted curve), for the status page's raw-versus-fitted plot."""
 
     timeline: Timeline | None
     skip: str | None = None
+    ramp_raw: tuple[dict, ...] = ()
+
+
+def ramp_raw_of(result: RefineResult) -> tuple[dict, ...]:
+    """Per ramp: its first frame and, for every frame, the measured edges (None where unreadable)."""
+    out = []
+    for b in result.boundaries:
+        if b.kind != "ramp" or not b.ramp:
+            continue
+        frames = [
+            {
+                "f": f.f,
+                "t": round(f.t, 4),
+                "raw": None
+                if f.raw is None
+                else {"top": f.raw.top, "bottom": f.raw.bottom, "left": f.raw.left, "right": f.raw.right},
+                "readable": f.readable,
+            }
+            for f in b.ramp
+        ]
+        out.append({"start_frame": b.ramp[0].f, "frames": frames})
+    return tuple(out)
 
 
 def _video(info: VideoInfo) -> Video:
@@ -157,4 +180,5 @@ def analyze_file(
     seg_params = seg_params or SegmentationParams()
     coarse = segment_samples(coarse_scan(path, info, threads=threads), info, seg_params)
     result = refine(path, info, coarse, refine_params or RefineParams())
-    return Analysis(build_timeline(path, info, result, seg_params, display_path=display_path, plex=plex))
+    timeline = build_timeline(path, info, result, seg_params, display_path=display_path, plex=plex)
+    return Analysis(timeline, ramp_raw=ramp_raw_of(result))

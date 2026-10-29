@@ -1,0 +1,260 @@
+"""The HTTP API and status page (spec Phase 4 "API"). LAN only; if `API_KEY` is set every `/api/v1` route needs it
+(`X-Api-Key` header, or `key=` in the query for simple clients). `/health` and the page itself are open; the page
+asks for the key and sends it as a header.
+
+A timeline answer is the stored timeline plus an `override` member (null, or the manual choice for this title). A
+file that changed since it was analysed gets no timeline (404 with `status: stale`), because a timeline for the old
+contents would zoom the wrong picture; the player then falls back to contain-by-display-ratio.
+"""
+
+from __future__ import annotations
+
+import hmac
+import json
+import os
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field
+
+from . import __version__
+from .config import Settings
+from .pathmap import PathMap, normalize
+from .scheduler import Scheduler
+from .store import PRIORITY_DEMAND, Store
+
+PAGE = Path(__file__).with_name("web") / "index.html"
+LIST_LIMIT = 200
+
+
+class Target(BaseModel):
+    """Any one way to name a title."""
+
+    path: str | None = None
+    part_id: int | None = None
+    rating_key: int | None = None
+    hash: str | None = Field(default=None, min_length=40, max_length=40)
+
+
+class OverrideBody(Target):
+    mode: str = Field(pattern="^(preset|disable|clear)$")
+    preset: float | None = Field(default=None, gt=0.5, lt=5)
+
+
+def _brief(row: dict[str, Any]) -> dict[str, Any]:
+    keep = (
+        "path", "title", "status", "priority", "skip_reason", "error", "attempts", "analyzer_version", "analyzed_at",
+        "queued_at", "started_at", "duration_s", "part_id", "rating_key", "flags", "segments", "size",
+    )  # fmt: skip
+    return {k: row.get(k) for k in keep}
+
+
+def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: PathMap) -> FastAPI:
+    started = time.time()
+    app = FastAPI(title="CIH Auto-Zoom analyzer", version=__version__, docs_url=None, redoc_url=None)
+
+    def authorize(request: Request) -> None:
+        if not settings.api_key:
+            return
+        given = request.headers.get("X-Api-Key") or request.query_params.get("key") or ""
+        if not hmac.compare_digest(given.encode(), settings.api_key.encode()):
+            raise HTTPException(401, "a valid API key is required")
+
+    secured = [Depends(authorize)]
+
+    def under_media_root(local: str) -> bool:
+        roots = [normalize(r) for r in settings.media_roots]
+        return ".." not in local.split("/") and any(
+            local == r or local.startswith(r.rstrip("/") + "/") for r in roots
+        )
+
+    def resolve(target: Target) -> tuple[dict[str, Any] | None, str | None]:
+        """The store row and the container path a request names (either may be missing)."""
+        if not any((target.path, target.part_id, target.rating_key, target.hash)):
+            raise HTTPException(422, "give one of path, part_id, rating_key or hash")
+        local = pathmap.to_local(target.path) if target.path else None
+        row = store.find(
+            path=local, part_id=target.part_id, rating_key=target.rating_key, quick_hash=target.hash
+        )
+        return row, (row["path"] if row else local)
+
+    def stale(row: dict[str, Any]) -> bool:
+        try:
+            stat = os.stat(row["path"])
+        except OSError:
+            return False  # not mounted here: serve what we have
+        return stat.st_size != row["size"] or abs(stat.st_mtime - row["mtime"]) > 1e-3
+
+    def queue_for(row: dict[str, Any] | None, local: str | None) -> str:
+        if local is None:
+            return "unknown"
+        if row is None:
+            if not (under_media_root(local) and os.path.isfile(local)):
+                return "unknown"
+            stat = os.stat(local)
+            store.seen(local, stat.st_size, stat.st_mtime, version=__version__, priority=PRIORITY_DEMAND)
+        return scheduler.request(local, PRIORITY_DEMAND)
+
+    @app.get("/health")
+    def health() -> JSONResponse:
+        try:
+            counts = store.counts()
+        except Exception:  # noqa: BLE001 - report, do not crash
+            return JSONResponse({"ok": False, "version": __version__}, status_code=503)
+        return JSONResponse(
+            {
+                "ok": True,
+                "version": __version__,
+                "schema": store.schema_version,
+                "queued": counts.get("queued", 0),
+            }
+        )
+
+    @app.get("/", response_class=HTMLResponse)
+    def page() -> str:
+        return PAGE.read_text(encoding="utf-8")
+
+    @app.get("/api/v1/timeline", dependencies=secured)
+    def timeline(
+        path: str | None = None,
+        part_id: int | None = None,
+        rating_key: int | None = None,
+        hash: str | None = Query(default=None, min_length=40, max_length=40),  # noqa: A002 - the documented name
+        analyze: int = 0,
+    ) -> JSONResponse:
+        row, local = resolve(Target(path=path, part_id=part_id, rating_key=rating_key, hash=hash))
+        status = row["status"] if row else "unknown"
+        if row and row["timeline"] and not stale(row):
+            body = json.loads(row["timeline"])
+            override = store.get_override(row["path"])
+            body["override"] = {"mode": override["mode"], "preset": override["preset"]} if override else None
+            return JSONResponse(body, headers={"X-Cih-Status": status})
+        if row and row["timeline"]:
+            status = "stale"
+        queued = queue_for(row, local) if analyze else None
+        return JSONResponse(
+            {"detail": "no timeline", "status": status, "queue": queued},
+            status_code=404,
+            headers={"X-Cih-Status": status},
+        )
+
+    @app.post("/api/v1/analyze", dependencies=secured)
+    def analyze(target: Target) -> dict[str, Any]:
+        row, local = resolve(target)
+        return {"path": local, "status": queue_for(row, local)}
+
+    @app.get("/api/v1/override", dependencies=secured)
+    def get_override(
+        path: str | None = None, part_id: int | None = None, rating_key: int | None = None
+    ) -> dict[str, Any]:
+        row, local = resolve(Target(path=path, part_id=part_id, rating_key=rating_key))
+        found = store.get_override(local) if local else None
+        return {
+            "path": local,
+            "override": {"mode": found["mode"], "preset": found["preset"]} if found else None,
+        }
+
+    @app.post("/api/v1/override", dependencies=secured)
+    def set_override(body: OverrideBody) -> dict[str, Any]:
+        _, local = resolve(body)
+        if local is None:
+            raise HTTPException(404, "no such title")
+        if body.mode == "clear":
+            return {"path": local, "cleared": store.clear_override(local)}
+        if body.mode == "preset" and body.preset is None:
+            raise HTTPException(422, "a preset override needs a ratio")
+        store.set_override(local, body.mode, body.preset)
+        return {
+            "path": local,
+            "override": {"mode": body.mode, "preset": body.preset if body.mode == "preset" else None},
+        }
+
+    @app.get("/api/v1/status", dependencies=secured)
+    def status() -> dict[str, Any]:
+        return {
+            "version": __version__,
+            "schema": store.schema_version,
+            "uptime_s": round(time.time() - started),
+            "counts": store.counts(),
+            "scheduler": scheduler.status(),
+            "plex": {"enabled": settings.plex_enabled, "skipped_sections": list(settings.plex_skip_sections)},
+            "media_roots": list(settings.media_roots),
+            "settings": {
+                "concurrency": settings.concurrency,
+                "quiet_hours": [t.strftime("%H:%M") for t in settings.quiet_hours]
+                if settings.quiet_hours
+                else None,
+                "pause_on_transcode": settings.pause_on_transcode,
+                "scan_interval_s": settings.scan_interval_s,
+            },
+        }
+
+    @app.get("/api/v1/queue", dependencies=secured)
+    def queue(limit: int = Query(100, ge=1, le=LIST_LIMIT)) -> list[dict[str, Any]]:
+        return [_brief(r) for r in store.queue(limit)]
+
+    @app.get("/api/v1/errors", dependencies=secured)
+    def errors(limit: int = Query(100, ge=1, le=LIST_LIMIT)) -> list[dict[str, Any]]:
+        return [_brief(r) for r in store.errors(limit)]
+
+    @app.get("/api/v1/files", dependencies=secured)
+    def files(
+        q: str = Query("", max_length=200), var: int = 0, limit: int = Query(50, ge=1, le=LIST_LIMIT)
+    ) -> list[dict[str, Any]]:
+        rows = store.var_titles(limit) if var else store.search(q, limit)
+        return [_brief(r) for r in rows]
+
+    @app.get("/api/v1/ramp", dependencies=secured)
+    def ramp(
+        path: str | None = None, part_id: int | None = None, rating_key: int | None = None
+    ) -> dict[str, Any]:
+        """Per ramp, per frame: the stored (fitted) edges and what was measured, for the status page plot (R14)."""
+        row, local = resolve(Target(path=path, part_id=part_id, rating_key=rating_key))
+        if not row or not row["timeline"]:
+            raise HTTPException(404, "no timeline")
+        fitted = json.loads(row["timeline"]).get("ramps", [])
+        raw = {
+            r["start_frame"]: {f["f"]: f for f in r["frames"]} for r in json.loads(row["ramp_raw"] or "[]")
+        }
+        out = []
+        for r in fitted:
+            measured = raw.get(r["start_frame"], {})
+            out.append(
+                {
+                    "start_frame": r["start_frame"],
+                    "end_frame": r["end_frame"],
+                    "confidence": r["confidence"],
+                    "frames": [{**f, "raw": (measured.get(f["f"]) or {}).get("raw")} for f in r["frames"]],
+                }
+            )
+        return {"path": row["path"], "ramps": out}
+
+    def background(task: Any) -> dict[str, str]:
+        threading.Thread(target=task, daemon=True, name="api-task").start()
+        return {"status": "started"}
+
+    @app.post("/api/v1/scan", dependencies=secured)
+    def scan() -> dict[str, str]:
+        return background(scheduler.scan_now)
+
+    @app.post("/api/v1/plex-sync", dependencies=secured)
+    def plex_sync() -> dict[str, str]:
+        if not settings.plex_enabled:
+            raise HTTPException(409, "Plex is not configured")
+        return background(scheduler.plex_now)
+
+    @app.post("/api/v1/pause", dependencies=secured)
+    def pause() -> dict[str, Any]:
+        scheduler.pause()
+        return {"paused": scheduler.paused_reason()}
+
+    @app.post("/api/v1/resume", dependencies=secured)
+    def resume() -> dict[str, Any]:
+        scheduler.resume()
+        return {"paused": scheduler.paused_reason()}
+
+    return app
