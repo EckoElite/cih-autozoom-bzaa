@@ -6,14 +6,16 @@ costs the detailed pass, and nothing is concluded from the list. A file that tur
 usual, just without the shortcut.
 
 The bundled list (`data/known_variable.txt`) was put together from Wikipedia's "List of IMAX films" (films shot partly
-on IMAX film cameras) and from widely documented variable-ratio releases. The ratio a given *file* has depends on which
-release it came from, so the list is wide on purpose. More titles can be added in a text file named by
+on IMAX film cameras), from widely documented variable-ratio releases, and from two reference tables the user supplied
+(titles and years only). The ratio a given *file* has depends on which release it came from, so the list is wide on
+purpose. More titles can be added in a text file named by
 `KNOWN_VARIABLE_FILE` (one `Title (Year)` per line).
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
@@ -22,8 +24,10 @@ _NAME = re.compile(r"^(?P<title>.+?)\s*\((?P<year>(?:18|19|20)\d\d)\)")
 
 
 def normalize(title: str) -> str:
-    """A title reduced to what must match: lower case, `&` as `and`, no leading article, letters and digits only."""
-    text = title.lower().replace("&", " and ")
+    """A title reduced to what must match: lower case, no accents, `&` as `and`, no leading article, letters and
+    digits only."""
+    text = unicodedata.normalize("NFKD", title.lower()).encode("ascii", "ignore").decode("ascii")
+    text = text.replace("&", " and ")
     text = re.sub(r"^(the|a|an)\s+", "", text.strip())
     return re.sub(r"[^a-z0-9]+", "", text)
 

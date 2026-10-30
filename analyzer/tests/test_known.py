@@ -30,6 +30,20 @@ def test_names_are_matched_by_title_and_year_not_punctuation_or_edition():
         ("/media/movies/Oppenheimer (2023)/movie.mkv", True),  # the folder names it
         ("/media/movies/Dunkirk (1958)/Dunkirk (1958) Remux-1080p.mkv", False),  # same title, another year
         ("/media/movies/The Grand Budapest Hotel (2014)/x.mkv", True),
+        (
+            "/media/movies/Asteroid City (2023)/Asteroid City (2023) Remux-2160p.mkv",
+            True,
+        ),  # from the user's tables
+        (
+            "/media/movies/Joker Folie a Deux (2024)/Joker Folie a Deux (2024).mkv",
+            True,
+        ),  # accents do not matter
+        ("/media/movies/(500) Days of Summer (2009)/(500) Days of Summer (2009).mkv", True),
+        ("/media/movies/Hells Angels (1930)/Hells Angels (1930).mkv", True),  # apostrophes do not matter
+        (
+            "/media/movies/Alita Battle Angel (2019)/Alita Battle Angel (2019).mkv",
+            False,
+        ),  # constant on every release
         ("/media/movies/Rings (2017)/Rings (2017) Remux-2160p.mkv", False),
     ],
 )
