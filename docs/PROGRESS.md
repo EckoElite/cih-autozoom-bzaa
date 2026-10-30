@@ -217,6 +217,21 @@ The user answered all five items: G1 accept R2 at 1 frame, G2 defer subtitles (R
 
 **Everything Everywhere All at Once (2026-10-30, 0.3.3 output, 3,794 s to analyze).** 126 segments and 12 ramps; 3840x2160, Dolby Vision profile 7; 1.85 (3840x2078) and 2.39 (3840x1616). Frame check: 108 of 157 bright frames match the timeline and 11 are larger than needed (the timeline says 1.85 where the frame is 2.39: safe, but about 12 minutes of the film in four merged stretches); **none is smaller than the picture (no spill)**, and 38 frames were too dark to read. Ramps: four are real, smooth ramps of 3 to 5.5 s (numbers 1, 3, 6 and the active 3 s of 8), checked against frames every 0.25 s: the stored curve is within 2 to 3 px of the measured edge throughout (5.7 px at worst, mid-ramp in ramp 8), always on the larger side; stored edges never reverse. Ramp 8 stops 18 px short of the next segment's rectangle (a 0.9% zoom step at its end). The other eight "ramps" are one-to-three-frame changes, or cuts, wrapped in a window of held frames (a stall of up to 142 frames, then a 77 or 232 px step): playback that follows them still lands on the right frame, but they are cuts in fact, not ramps. **This is a better T8 reference than Catching Fire**: real 3 to 5.5 s ramps, between 1.85 and 2.39, with the edge moving evenly. Fixed in 0.3.6 (not yet installed): see DD35.
 
+**Re-run under 0.3.6 (2026-10-30, container updated, 4 workers).** Eleven multi-segment films re-checked against single decoded frames (`verify_tl.py`, read-only; judged by the zoom the player would apply, not by raw rectangle: SPILL = timeline zoom more than 0.6% above what the real picture needs, small = more than 3% below). About 1,990 frames in all, uniform plus 0.6 s either side of every boundary:
+
+| Film | Segments (0.3.6) | Frames | ok | SPILL | small (body / credits, under 0.9) |
+|---|---|---|---|---|---|
+| Interstellar | 181 | 420 | 353 | 0 | 62 / 4 |
+| Dunkirk | 89 | 236 | 196 | **1** | 34 / 3 |
+| Oppenheimer | 217 | 512 | 434 | 0 | 75 / 2 |
+| Everything Everywhere | 150 (13 ramps) | 378 | 301 | 0 | 72 / 4 |
+| Six smaller films | 2 to 13 each | 40 to 54 each | most | 0 | 0 to 2 in the body |
+
+- **One spill, unchanged from 0.3.3:** Dunkirk 3389.4 to 3391.1 s. A 1.7 s shot with side bars (3420x2160, full height) sits inside a segment the timeline calls 2.20; for that 1.7 s the picture would be 23% too big (top and bottom overhang). The timeline for this film is byte-for-byte the same segments as 0.3.3, so this is the known limit (a shot shorter than the keyframe spacing is invisible to the first pass), not a regression. Dense sampling of variable-ratio films is the candidate fix.
+- **"small" is the cost of the safety rule:** most of it sits within about 1.6 s after a boundary, where the change is placed at the end of its coarse window that keeps the larger picture, so a shrink shows bars for up to one keyframe interval. Credits and logo shots add the rest. No frame is measured smaller than the picture except the Dunkirk one above.
+- **Ramps:** every sample taken inside an Everything Everywhere ramp but one is within 0.3% zoom of the measured picture; the exception (5121 s) is a small bright inset of about 1860x480 px inside a ramp's span, which is safe (bars only) and which I did not investigate. Not re-verified this run: ramp 8's 18 px shortfall and the eight short "ramps" that are really cuts.
+- **Not done:** the hybrid on-demand mode, a seek-based sparse first pass, GPU decode.
+
 ## Decision (2026-10-29): hybrid analysis
 
 The user chose: batch analysis stays for Movies; TV and everything else are analyzed on demand; **and any movie not yet analyzed when played is also analyzed on demand**, the same as TV. Until the timeline arrives the player shows the R6 fallback (contain the container DAR, 16:9 here). Needs a playhead-first range mode in the analyzer (analyze from the playing position forward, publish partial coverage) and player polling; this is Phase 5 work, not built yet.
