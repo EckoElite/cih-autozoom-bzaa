@@ -589,7 +589,9 @@ def _place_conservatively(
     if b.window is None:
         return False
     if b.kind == "ramp":
-        if not b.ramp or not _ramp_not_worth_keeping(b, before, after, info):
+        # a ramp measured with doubt (unreadable frames, low confidence) between two established pictures is as real
+        # as a cut whose frame is in doubt: its span is the uncertainty
+        if not b.ramp or (_trusted(b) and not _ramp_not_worth_keeping(b, before, after, info)):
             return False
     elif _trusted(b):
         return False

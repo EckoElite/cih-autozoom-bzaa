@@ -88,10 +88,16 @@ def test_a_dim_or_partial_larger_sample_is_still_flicker():
     assert [s.aspect for s in segment_samples(dim, make_info(duration=40.0)).segments] == [
         2.39
     ]  # too dark to vouch
-    partial = run(0, 20, 2.39, step=1.6) + [sample(20.0, 1.90, yavg=70.0)] + run(21.6, 40, 2.39, step=1.6)
-    assert [s.aspect for s in segment_samples(partial, make_info(duration=40.0)).segments] == [
-        2.39
-    ]  # not the full frame
+    seen = sample(20.0, 1.90, yavg=70.0)  # the same crop, but it had grown on one side only (a subtitle)
+    lopsided = Sample(seen.t, seen.x, seen.y, seen.w, seen.h, seen.yavg, skew=150)
+    partial = run(0, 20, 2.39, step=1.6) + [lopsided] + run(21.6, 40, 2.39, step=1.6)
+    assert [s.aspect for s in segment_samples(partial, make_info(duration=40.0)).segments] == [2.39]
+    symmetric = run(0, 20, 2.39, step=1.6) + [seen] + run(21.6, 40, 2.39, step=1.6)
+    assert [s.aspect for s in segment_samples(symmetric, make_info(duration=40.0)).segments] == [
+        2.39,
+        1.90,
+        2.39,
+    ]  # opened on both sides alike: a real bigger picture
 
 
 def test_a_studio_logo_at_16_9_before_a_scope_film_is_two_segments():
@@ -228,11 +234,11 @@ def test_no_usable_samples():
 
 
 def test_minimum_segment_length_is_a_parameter():
-    samples = run(0, 10, 2.39) + run(10, 12, 1.90) + run(12, 30, 2.39)
+    samples = run(0, 10, 1.90) + run(10, 12, 2.39) + run(12, 30, 1.90)  # a short shot of a smaller picture
     assert len(segment_samples(samples, make_info(duration=30.0)).segments) == 1
     short = SegmentationParams(min_segment_s=1.5)
     assert [s.aspect for s in segment_samples(samples, make_info(duration=30.0), short).segments] == [
-        2.39,
         1.90,
         2.39,
+        1.90,
     ]

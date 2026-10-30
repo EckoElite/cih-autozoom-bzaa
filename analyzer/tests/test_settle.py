@@ -151,6 +151,22 @@ def test_a_ramp_that_stops_short_of_the_next_picture_is_placed_not_merged():
     assert out_boundaries[0].kind == "cut" and out_boundaries[0].ramp == ()
 
 
+def test_a_ramp_measured_with_doubt_between_two_established_pictures_is_placed_not_merged():
+    # Everything Everywhere: a quick 1.85 to scope change in dark frames read as a low-confidence ramp, which used to
+    # widen 115 s of scope to 1.85
+    wide85 = (0, 40, 3840, 2080)
+    frames = [fit((0, 40 + 58 * k, 3840, 2080 - 116 * k), k) for k in range(5)]
+    boundary = opening_ramp(frames, t_start=68.8, t=69.5, flags=("many_unreadable_frames", "low_confidence"))
+    boundary = RefinedBoundary(**{**boundary.__dict__, "confidence": 0.25, "window": (67.5, 70.4)})
+    segments = [seg(0, 68.8, wide85), seg(69.5, 185, SCOPE)]
+    out_segments, out_boundaries, merges = settle(segments, [boundary], INFO)
+    assert merges == 0 and [s.rect for s in out_segments] == [wide85, SCOPE]
+    assert (
+        out_segments[0].end == out_segments[1].start == 70.4
+    )  # the picture shrinks, so the larger one stays longer
+    assert out_boundaries[0].kind == "cut" and "placed_conservatively" in out_boundaries[0].flags
+
+
 def test_a_ramp_that_barely_moves_the_picture_is_not_worth_following():
     frames = [fit((0, 276 + k, 3840, 1608 - 2 * k), k) for k in range(6)]  # a few pixels in all
     segments = [seg(0, 10, SCOPE), seg(14, 30, (0, 286, 3840, 1588))]

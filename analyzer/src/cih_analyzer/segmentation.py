@@ -38,8 +38,9 @@ MIN_RECT_TOLERANCE_PX = 8
 MIN_EXCURSION_STATES = 3
 VERIFY_CONFIDENCE = 0.9
 VERIFY_SHORT_SEGMENT_S = 15.0
-FULL_FRAME_SHARE = 0.98  # a picture this much of the frame in both directions fills it
+FULL_FRAME_SHARE = 0.9  # a picture this much of the frame in both directions (1.85 in 16:9 is 96%) fills it
 INSERT_MIN_YAVG = 40.0  # a sample must be at least this bright (0..255) to vouch for a full-frame insert
+INSERT_MAX_SKEW = 0.02  # of the frame height: a real bigger picture opens the matte on both sides alike
 INSERT_LARGER_BY = 0.9  # the pictures either side must cover at most this share of the insert's area
 
 
@@ -189,6 +190,8 @@ class _Context:
             return False
         if min(s.yavg for s, _ in run.samples) < INSERT_MIN_YAVG:
             return False
+        if max(s.skew for s, _ in run.samples) > INSERT_MAX_SKEW * height:
+            return False  # a crop that grew on one side only is a subtitle or a bright object in the matte
         beside = [runs[j] for j in (i - 1, i + 1) if 0 <= j < len(runs)]
         return bool(beside) and all(r.rect[2] * r.rect[3] <= INSERT_LARGER_BY * w * h for r in beside)
 
