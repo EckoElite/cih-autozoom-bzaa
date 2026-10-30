@@ -76,10 +76,10 @@
       <button id="scan">Scan media now</button><button id="plex">Sync Plex now</button>
     </div>
     <div class="row">
-      <label>Files analysed at once <input type="number" id="workers" min="1" max="16" style="width:4.5em"></label>
+      <label>Files analysed at once <input type="number" id="workers" min="0" max="16" inputmode="numeric" style="width:4.5em"></label>
       <button id="setworkers">Apply</button><button id="resetworkers" title="Forget the saved count and use the CONCURRENCY setting from the container template">Use template setting</button>
     </div>
-    <p class="muted" id="workershint">Raising it starts more now; lowering it lets running files finish and takes no new ones. Saved across restarts.</p>
+    <p class="muted" id="workershint">Raising it starts more now; lowering it lets running files finish and takes no new ones; 0 starts nothing new. Saved across restarts.</p>
   </section>
 
   <section>
@@ -125,6 +125,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 let current = null;
+let workersEdited = false;
 
 function el(tag, props, ...kids) {
   const e = document.createElement(tag);
@@ -134,7 +135,10 @@ function el(tag, props, ...kids) {
 }
 function key() { try { return localStorage.getItem("cihKey") || ""; } catch (e) { return ""; } }
 function saveKey(v) { try { localStorage.setItem("cihKey", v); } catch (e) { /* private window */ } }
-function note(msg, cls) { const n = $("note"); n.textContent = msg; n.className = cls || "muted"; }
+// A message stays up for a few seconds, so the next automatic refresh cannot wipe it before it is read.
+let noteUntil = 0;
+function note(msg, cls, seconds) { const n = $("note"); n.textContent = msg; n.className = cls || "muted"; noteUntil = Date.now() + (seconds || 0) * 1000; }
+function clearNote() { if (Date.now() >= noteUntil) note(""); }
 
 async function api(path, opts) {
   const o = Object.assign({ headers: {} }, opts || {});
@@ -207,8 +211,8 @@ async function refresh() {
     }
     const sc = s.scheduler;
     const wi = $("workers"); wi.max = s.settings.max_workers;
-    if (document.activeElement !== wi) wi.value = sc.workers;
-    $("workershint").textContent = "Raising it starts more now; lowering it lets running files finish and takes no new ones. " +
+    if (!workersEdited) wi.value = sc.workers;  // never overwrite a number the user has typed and not yet applied
+    $("workershint").textContent = "Raising it starts more now; lowering it lets running files finish and takes no new ones; 0 starts nothing new. " +
       (s.settings.concurrency_saved ? "Saved across restarts (template says " + s.settings.concurrency_env + "). " : "Using the template setting (" + s.settings.concurrency_env + "). ") +
       (s.settings.start_paused ? "The template starts the container paused." : "");
     $("sched").textContent = (sc.paused ? "Paused: " + sc.paused + ". " : "Running. ") + sc.busy + " of " + sc.workers + " worker(s) busy" +
@@ -230,7 +234,7 @@ async function refresh() {
       const b = el("button", { textContent: "Retry" }); b.onclick = () => analyze(r.path);
       return el("div", { className: "job" }, nameBlock(r), el("div", { className: "err bad", textContent: r.error || "" }), el("div", { className: "row" }, b));
     }));
-    note("");
+    clearNote();
   } catch (err) { note(err.message, "bad"); }
 }
 
@@ -302,20 +306,27 @@ $("pause").onclick = async () => { await json("/api/v1/pause", { method: "POST" 
 $("resume").onclick = async () => { await json("/api/v1/resume", { method: "POST" }); refresh(); };
 $("scan").onclick = async () => { await json("/api/v1/scan", { method: "POST" }); note("Scan started"); };
 $("plex").onclick = async () => { try { await json("/api/v1/plex-sync", { method: "POST" }); note("Plex sync started"); } catch (e) { note(e.message, "bad"); } };
+$("workers").oninput = () => { workersEdited = true; };
 $("setworkers").onclick = async () => {
-  const n = parseInt($("workers").value, 10);
+  const raw = $("workers").value.trim(), n = Number(raw), max = Number($("workers").max) || 16;
+  if (raw === "" || !Number.isInteger(n) || n < 0 || n > max) {
+    note("Enter a whole number from 0 to " + max + ".", "bad", 8);
+    return;  // the typed value stays, so it can be corrected
+  }
   try {
     const r = await json("/api/v1/concurrency", { method: "POST", body: { workers: n } });
+    workersEdited = false;
     await refresh();
-    note("Analysing " + r.workers + " file(s) at once");
-  } catch (e) { note("Could not change the count: " + e.message, "bad"); }
+    note(r.workers === 0 ? "No new files will start; the ones running will finish." : "Analysing " + r.workers + " file(s) at once.", "ok", 8);
+  } catch (e) { note("Could not change the count: " + e.message, "bad", 8); }
 };
 $("resetworkers").onclick = async () => {
   try {
     const r = await json("/api/v1/concurrency", { method: "DELETE" });
+    workersEdited = false;
     await refresh();
-    note("Back to the template setting: " + r.workers + " file(s) at once");
-  } catch (e) { note("Could not change the count: " + e.message, "bad"); }
+    note("Back to the template setting: " + r.workers + " file(s) at once.", "ok", 8);
+  } catch (e) { note("Could not change the count: " + e.message, "bad", 8); }
 };
 $("reanalyze").onclick = () => current && analyze(current);
 $("ovsave").onclick = async () => {

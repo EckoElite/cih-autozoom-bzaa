@@ -88,7 +88,7 @@ def test_the_worker_count_is_set_and_reported_through_the_api(api):
     assert status["scheduler"]["workers"] == 5 and status["settings"]["concurrency"] == 5
     assert status["settings"]["concurrency_env"] == 1  # what the CONCURRENCY setting said
     assert store.get_meta("workers") == "5"
-    for bad in (0, 17, "x"):
+    for bad in (-1, 17, "x"):
         assert client.post("/api/v1/concurrency", json={"workers": bad}).status_code == 422
     assert sched.workers == 5
     assert status["settings"]["concurrency_saved"] == "5" and status["settings"]["start_paused"] is False

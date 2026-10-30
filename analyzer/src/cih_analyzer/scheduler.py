@@ -219,7 +219,7 @@ class Scheduler:
         saved = self.store.get_meta(WORKERS_META)
         if saved:  # an empty value is a cleared count
             try:
-                return max(1, min(MAX_WORKERS, int(saved)))
+                return max(0, min(MAX_WORKERS, int(saved)))
             except ValueError:
                 log.warning("ignoring the saved worker count %r", saved)
         return max(1, min(MAX_WORKERS, self.settings.concurrency))
@@ -230,10 +230,11 @@ class Scheduler:
 
     def set_workers(self, count: int) -> int:
         """Change how many analyses run at once, without stopping any that are running. Raising it starts workers
-        now; lowering it lets the surplus workers finish the file they are on and then stop taking new ones. The
-        count is saved, so it survives a restart and takes the place of the CONCURRENCY setting."""
-        if not 1 <= count <= MAX_WORKERS:
-            raise ValueError(f"the worker count must be from 1 to {MAX_WORKERS}")
+        now; lowering it lets the surplus workers finish the file they are on and then stop taking new ones. Zero
+        means no new file starts at all (the ones running finish). The count is saved, so it survives a restart and
+        takes the place of the CONCURRENCY setting."""
+        if not 0 <= count <= MAX_WORKERS:
+            raise ValueError(f"the worker count must be from 0 to {MAX_WORKERS}")
         self.store.set_meta(WORKERS_META, str(count))
         return self.set_workers_unsaved(count)
 

@@ -46,7 +46,7 @@ class OverrideBody(Target):
 
 
 class WorkersBody(BaseModel):
-    workers: int = Field(ge=1, le=MAX_WORKERS)
+    workers: int = Field(ge=0, le=MAX_WORKERS)
 
 
 def _brief(row: dict[str, Any]) -> dict[str, Any]:
