@@ -108,10 +108,15 @@ class FakeClient:
     def __init__(self, *lookups):
         self.lookups = list(lookups)
         self.calls = []
+        self.requests = []  # (ident, at) of the explicit requests for analysis
 
-    def timeline(self, ident, request_analysis=True):
+    def timeline(self, ident, request_analysis=True, at=None):
         self.calls.append((ident, request_analysis))
         return self.lookups.pop(0) if len(self.lookups) > 1 else self.lookups[0]
+
+    def request_analysis(self, ident, at=None):
+        self.requests.append((ident, at))
+        return True
 
 
 class GlueTests(unittest.TestCase):
@@ -126,6 +131,7 @@ class GlueTests(unittest.TestCase):
         self._make = service.make_client
         service.make_client = lambda: self.client
         service.POLL_FLOOR_S = 0.05
+        service.FAST_POLL_S = 0.05
 
     def tearDown(self):
         for player in self.players:
@@ -209,6 +215,42 @@ class GlueTests(unittest.TestCase):
         self.assertEqual(self.zooms()[:2], [0.7565, 1.0])              # the timeline arrived: scope at this position
         self.assertTrue(all(request is False for _, request in self.client.calls[1:]))   # polling asks, never queues
 
+    def test_a_provisional_timeline_is_used_at_once_and_the_final_one_replaces_it(self):
+        def segment(start, end, h, frame):
+            return {"start": start, "end": end, "active": {"x": 0, "y": (2160 - h) // 2, "w": 3840, "h": h},
+                    "boundary": {"kind": "cut", "frame": frame, "scene_cut": None}}  # fmt: skip
+
+        provisional = {"provisional": True, "coverage": [[0.0, 60.0]],
+                       "video": {"width": 3840, "height": 2160, "sar": "1:1", "fps": 24},
+                       "segments": [segment(0, 60, 1622, 0), segment(60, 100, 2160, 1440)], "ramps": []}  # fmt: skip
+        longer = dict(provisional, coverage=[[0.0, 90.0]])
+        final = {"video": provisional["video"], "segments": [segment(0, 100, 2078, 0)], "ramps": []}  # 1.85
+        self.client = FakeClient(client_mod.Lookup("missing"), client_mod.Lookup("provisional", provisional),
+                                 client_mod.Lookup("provisional", longer), client_mod.Lookup("ok", final))  # fmt: skip
+        XBMC.Player.t0 = time.perf_counter()
+        player = self.new_player()
+        player.onAVStarted()
+        self.assertEqual(self.zooms()[0], 0.7565)  # nothing known yet: the whole frame, contained
+        found = self.wait_for(lambda: 0.7863 in self.zooms())  # ...then the final 1.85 picture
+        self.assertTrue(found, (self.zooms(), len(self.client.calls)))
+        player.onPlayBackStopped()
+        values = [z for i, z in enumerate(self.zooms()) if i == 0 or z != self.zooms()[i - 1]]
+        self.assertEqual(values[:3], [0.7565, 1.0, 0.7863])  # contained, then the survey's picture, then the final one
+        self.assertGreaterEqual(len(self.client.calls), 4)  # it kept asking until the final timeline came
+        self.assertFalse(player.provisional)
+
+    def test_a_seek_while_the_timeline_is_only_provisional_tells_the_analyzer_where_the_player_is(self):
+        self.client = FakeClient(client_mod.Lookup("missing"))
+        XBMC.Player.t0 = time.perf_counter()
+        player = self.new_player()
+        player.onAVStarted()
+        XBMC.Player.t0 = time.perf_counter() - 1500.0  # resumed 25 minutes in
+        player.onPlayBackSeek(1500000, 1500000)
+        self.assertTrue(self.wait_for(lambda: self.client.requests))
+        ident, at = self.client.requests[0]
+        self.assertEqual(ident["part_id"], 42)
+        self.assertAlmostEqual(at, 1500.0, delta=2.0)
+        player.onPlayBackStopped()
     def test_an_unreadable_timeline_falls_back_instead_of_crashing(self):
         self.client = FakeClient(client_mod.Lookup("ok", {"video": {"width": 3840}, "segments": "nonsense"}))
         XBMC.Player.t0 = time.perf_counter()

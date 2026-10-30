@@ -200,3 +200,29 @@ def test_a_requeue_made_by_hand_waits_for_resume_and_does_not_take_the_express_l
     finally:
         sched.stop(2)
         store.close()
+
+
+def test_a_request_with_the_playhead_position_is_remembered_and_moves_a_survey_that_began_far_away(tmp_path):
+    movies, tv = libraries(tmp_path)
+    store = Store(tmp_path / "s.sqlite")
+    settings = Settings(config_dir=tmp_path, media_roots=(movies,), express_workers=0)
+    sched = Scheduler(settings, store, PathMap(), runner=lambda p, t, s: RunResult(timeline=timeline(p)))
+    sched.scan_now()
+    film = f"{movies}/m1.mkv"
+    assert sched.request(film, PRIORITY_PLAYER, at=600.0) == "queued"
+    assert sched._start_at[film] == 600.0  # the survey will begin there
+    job = store.claim_next(max_priority=PRIORITY_PLAYER)
+    assert job["path"] == film
+    stop = threading.Event()
+    sched._job_stops[film] = stop  # what run_one registers while the worker process runs
+    # the player resumed far from where the survey began, and nothing known covers it: the job moves
+    assert sched.request(film, PRIORITY_PLAYER, at=2400.0) == "queued"
+    assert stop.is_set() and sched._start_at[film] == 2400.0
+    # when what the survey knows already covers the place, or it is near, the job is left alone
+    stop.clear()
+    sched._set_provisional(film, {"coverage": [[2300.0, 2500.0]]})
+    assert sched.request(film, PRIORITY_PLAYER, at=2450.0) == "running" and not stop.is_set()
+    assert sched.request(film, PRIORITY_PLAYER, at=2420.0) == "running" and not stop.is_set()
+    # a request made by hand never moves anything
+    assert sched.request(film, PRIORITY_DEMAND, at=10.0) == "running" and not stop.is_set()
+    store.close()

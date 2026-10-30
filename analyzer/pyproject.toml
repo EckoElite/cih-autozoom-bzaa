@@ -1,6 +1,6 @@
 [project]
 name = "cih-analyzer"
-version = "0.3.10"
+version = "0.3.11"
 description = "Offline aspect-ratio timeline analyzer for CIH Auto-Zoom"
 requires-python = ">=3.12"
 dependencies = [

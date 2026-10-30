@@ -19,8 +19,10 @@ from identify import cache_key
 
 @dataclass
 class Lookup:
-    """`status`: "ok" (fresh from the analyzer), "cached" (analyzer unreachable, copy from disk), "missing" (the
-    analyzer does not have it yet), "unreachable" (and no copy), or "unknown" (nothing identifies the title)."""
+    """`status`: "ok" (fresh from the analyzer), "provisional" (the analyzer is still working on it but knows the
+    stretch around the player: `timeline` is exact over its `coverage` and the whole frame elsewhere), "cached"
+    (analyzer unreachable, copy from disk), "missing" (the analyzer does not have it yet), "unreachable" (and no
+    copy), or "unknown" (nothing identifies the title)."""
 
     status: str
     timeline: dict | None = None
@@ -57,7 +59,8 @@ class AnalyzerClient:
         """Every key we have: the analyzer tries them in turn (path, part id, rating key) until one finds the title."""
         return {k: ident[k] for k in ("part_id", "rating_key", "path") if ident.get(k)}
 
-    def timeline(self, ident: dict, request_analysis: bool = True) -> Lookup:
+    def timeline(self, ident: dict, request_analysis: bool = True, at: float | None = None) -> Lookup:
+        """`at` is where the player is, in seconds: the analyzer starts looking there."""
         query = self._query(ident)
         if not query:
             return Lookup("unknown")
@@ -68,8 +71,11 @@ class AnalyzerClient:
                 timeline = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
+                provisional = self._provisional_of(exc)
                 if request_analysis:
-                    self.request_analysis(ident)
+                    self.request_analysis(ident, at)
+                if provisional is not None:
+                    return Lookup("provisional", provisional)
                 cached = self._read_cache(ident)  # an older timeline beats none while the new one is made
                 return Lookup("cached", cached) if cached else Lookup("missing")
             return self._offline(ident)
@@ -82,11 +88,22 @@ class AnalyzerClient:
         cached = self._read_cache(ident)
         return Lookup("cached", cached) if cached else Lookup("unreachable")
 
-    def request_analysis(self, ident: dict) -> bool:
-        """Queue the title at priority. Returns False if the request could not be made."""
+    @staticmethod
+    def _provisional_of(error: urllib.error.HTTPError) -> dict | None:
+        """The `provisional` timeline in a 404 answer, if the analyzer sent one."""
+        try:
+            found = json.loads(error.read().decode("utf-8")).get("provisional")
+        except (OSError, ValueError, AttributeError):
+            return None
+        return found if isinstance(found, dict) and found.get("segments") else None
+
+    def request_analysis(self, ident: dict, at: float | None = None) -> bool:
+        """Queue the title at priority, from `at` seconds if the player is there. False if the request failed."""
         try:
             body = {k: v for k, v in ident.items() if v and k != "kind"}
             body["source"] = "player"  # someone is waiting to watch it: the analyzer serves it ahead of the queue
+            if at is not None:
+                body["at"] = round(float(at), 1)
             with self._request("POST", "/api/v1/analyze", None, body):
                 return True
         except (urllib.error.URLError, OSError, ValueError):

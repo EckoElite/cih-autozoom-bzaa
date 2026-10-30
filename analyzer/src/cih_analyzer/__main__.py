@@ -20,7 +20,8 @@ from .skip import inspect_file
 
 USAGE = (
     "usage: python -m cih_analyzer [--analyze | --analyze-envelope] [--sample-interval SECONDS] "
-    "[--survey-interval SECONDS] [--progress-file PATH] <file> [<file> ...]"
+    "[--survey-interval SECONDS] [--start-at SECONDS] [--progress-file PATH] [--partial-file PATH] "
+    "<file> [<file> ...]"
 )
 
 
@@ -39,11 +40,28 @@ def progress_writer(path: str) -> Callable[[str, float], None]:
     return write
 
 
+def partial_writer(path: str) -> Callable[[dict], None]:
+    """Keep `path` holding the latest provisional timeline, replaced whole so a reader never sees half of it."""
+    scratch = path + ".tmp"
+
+    def write(timeline: dict) -> None:
+        try:
+            with open(scratch, "w", encoding="utf-8") as fh:
+                json.dump(timeline, fh, separators=(",", ":"))
+            os.replace(scratch, path)
+        except OSError:
+            pass  # a courtesy, like progress
+
+    return write
+
+
 def main(argv: list[str]) -> int:
     interval: float | None = None
     survey: float | None = None
+    start_at = 0.0
     progress_path: str | None = None
-    for flag in ("--sample-interval", "--survey-interval"):
+    partial_path: str | None = None
+    for flag in ("--sample-interval", "--survey-interval", "--start-at"):
         if flag in argv:
             at = argv.index(flag)
             try:
@@ -54,15 +72,21 @@ def main(argv: list[str]) -> int:
             argv = argv[:at] + argv[at + 2 :]
             if flag == "--sample-interval":
                 interval = value
+            elif flag == "--start-at":
+                start_at = value
             else:
                 survey = value
-    if "--progress-file" in argv:
-        at = argv.index("--progress-file")
-        if at + 1 >= len(argv):
-            print(USAGE, file=sys.stderr)
-            return 2
-        progress_path = argv[at + 1]
-        argv = argv[:at] + argv[at + 2 :]
+    for flag in ("--progress-file", "--partial-file"):
+        if flag in argv:
+            at = argv.index(flag)
+            if at + 1 >= len(argv):
+                print(USAGE, file=sys.stderr)
+                return 2
+            if flag == "--progress-file":
+                progress_path = argv[at + 1]
+            else:
+                partial_path = argv[at + 1]
+            argv = argv[:at] + argv[at + 2 :]
     mode = argv[0] if argv and argv[0] in ("--analyze", "--analyze-envelope") else None
     paths = argv[1:] if mode else argv
     if not paths or (mode and len(paths) != 1):
@@ -76,6 +100,8 @@ def main(argv: list[str]) -> int:
                 survey_interval_s=survey,
                 known_variable_file=os.environ.get("KNOWN_VARIABLE_FILE", ""),
                 progress=progress_writer(progress_path) if progress_path else None,
+                start_at=start_at,
+                on_partial=partial_writer(partial_path) if partial_path else None,
             )
         except Exception as exc:  # noqa: BLE001 - say what went wrong in one line, with an exit code of its own
             print(f"{type(exc).__name__}: {' '.join(str(exc).split())[:400]}", file=sys.stderr)

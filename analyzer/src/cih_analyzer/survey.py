@@ -92,27 +92,46 @@ def survey_scan(
     scale_width: int = SCALE_WIDTH,
     timeout: float = SEEK_TIMEOUT_S,
     progress: Callable[[float], None] | None = None,
+    start_at: float = 0.0,
+    on_batch: Callable[[dict[int, list[Sample]], dict], None] | None = None,
 ) -> list[Sample]:
     """Measure the picture at one place every `interval` seconds. Raises ProbeError if ffmpeg is missing or too many
-    seeks fail (a damaged file); a few failures are skipped."""
+    seeks fail (a damaged file); a few failures are skipped.
+
+    The places are visited from `start_at` (where a player is) to the end of the file, then from the start up to
+    `start_at`. `on_batch(samples_by_slot, where)` is called early (after 3 places, then every 4) so a caller can use
+    what is known about the stretch around `start_at` long before the survey is done; `where` says how far each
+    direction has got: `{"step", "slots", "first", "forward", "wrapped"}`."""
     exe = shutil.which("ffmpeg")
     if exe is None:
         raise ProbeError("ffmpeg not found on PATH")
     vf = build_filter(info, limit if limit is not None else limit_for(info), scale_width, 0.0)
     targets = seek_targets(info, interval)
+    slots = len(targets)
+    step = info.duration / slots
+    first = min(slots - 1, max(0, int(start_at // step))) if slots else 0
+    order = [*range(first, slots), *range(0, first)]
     found: dict[float, Sample] = {}
+    by_slot: dict[int, list[Sample]] = {}
     failed = 0
-    for n, at in enumerate(targets, start=1):
-        got = _seek_sample(exe, str(path), info, vf, at, timeout)
+    for n, slot in enumerate(order, start=1):
+        got = _seek_sample(exe, str(path), info, vf, targets[slot], timeout)
         if got is None:
             failed += 1
         else:
+            by_slot[slot] = got
             for sample in got:
                 found.setdefault(round(sample.t, 2), sample)
+        if on_batch and (n == 3 or (n > 3 and (n - 3) % 4 == 0) or n == slots):
+            forward = min(n, slots - first)
+            on_batch(
+                dict(by_slot),
+                {"step": step, "slots": slots, "first": first, "forward": forward, "wrapped": n - forward},
+            )
         if progress:
-            progress(n / len(targets))
-    if failed > MAX_FAILED_SHARE * len(targets):
-        raise ProbeError(f"survey: {failed} of {len(targets)} seeks failed")
+            progress(n / slots)
+    if failed > MAX_FAILED_SHARE * slots:
+        raise ProbeError(f"survey: {failed} of {slots} seeks failed")
     return [found[t] for t in sorted(found)]
 
 

@@ -5,6 +5,10 @@ asks for the key and sends it as a header.
 A timeline answer is the stored timeline plus an `override` member (null, or the manual choice for this title). A
 file that changed since it was analysed gets no timeline (404 with `status: stale`), because a timeline for the old
 contents would zoom the wrong picture; the player then falls back to contain-by-display-ratio.
+
+A title being analysed for a player answers 404 too, with a `provisional` member once the survey (which starts where the
+player is) knows the stretch around it: a timeline-shaped answer that is exact only over `coverage` and contains the
+whole frame elsewhere. The player uses it at once and keeps asking until the real timeline replaces it.
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ class AnalyzeBody(Target):
     queue. Anything else, including no source, is a player that is waiting for the title and goes to an express worker."""
 
     source: str | None = None
+    at: float | None = Field(default=None, ge=0, description="where the player is, in seconds")
 
 
 class OverrideBody(Target):
@@ -100,7 +105,9 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
             return False  # not mounted here: serve what we have
         return stat.st_size != row["size"] or abs(stat.st_mtime - row["mtime"]) > 1e-3
 
-    def queue_for(row: dict[str, Any] | None, local: str | None, player: bool = False) -> str:
+    def queue_for(
+        row: dict[str, Any] | None, local: str | None, player: bool = False, at: float | None = None
+    ) -> str:
         priority = PRIORITY_PLAYER if player else PRIORITY_DEMAND
         if local is None:
             return "unknown"
@@ -109,7 +116,7 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
                 return "unknown"
             stat = os.stat(local)
             store.seen(local, stat.st_size, stat.st_mtime, version=__version__, priority=priority)
-        return scheduler.request(local, priority)
+        return scheduler.request(local, priority, at=at)
 
     @app.get("/health")
     def health() -> JSONResponse:
@@ -137,6 +144,7 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
         rating_key: int | None = None,
         hash: str | None = Query(default=None, min_length=40, max_length=40),  # noqa: A002 - the documented name
         analyze: int = 0,
+        at: float | None = Query(default=None, ge=0),
     ) -> JSONResponse:
         row, local = resolve(Target(path=path, part_id=part_id, rating_key=rating_key, hash=hash))
         status = row["status"] if row else "unknown"
@@ -147,17 +155,26 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
             return JSONResponse(body, headers={"X-Cih-Status": status})
         if row and row["timeline"]:
             status = "stale"
-        queued = queue_for(row, local, player=True) if analyze else None  # `analyze=1` is what a player sends
-        return JSONResponse(
-            {"detail": "no timeline", "status": status, "queue": queued},
-            status_code=404,
-            headers={"X-Cih-Status": status},
-        )
+        queued = (
+            queue_for(row, local, player=True, at=at) if analyze else None
+        )  # `analyze=1` is what a player sends
+        answer: dict[str, Any] = {"detail": "no timeline", "status": status, "queue": queued}
+        provisional = scheduler.provisional_of(local) if local else None
+        if provisional is not None:  # the survey is running and already knows the stretch around the player
+            override = store.get_override(local)
+            provisional["override"] = (
+                {"mode": override["mode"], "preset": override["preset"]} if override else None
+            )
+            answer["provisional"] = provisional
+        return JSONResponse(answer, status_code=404, headers={"X-Cih-Status": status})
 
     @app.post("/api/v1/analyze", dependencies=secured)
     def analyze(target: AnalyzeBody) -> dict[str, Any]:
         row, local = resolve(target)
-        return {"path": local, "status": queue_for(row, local, player=target.source != "manual")}
+        return {
+            "path": local,
+            "status": queue_for(row, local, player=target.source != "manual", at=target.at),
+        }
 
     @app.get("/api/v1/override", dependencies=secured)
     def get_override(

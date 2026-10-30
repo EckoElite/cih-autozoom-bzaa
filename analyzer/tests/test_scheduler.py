@@ -438,7 +438,7 @@ def test_the_default_runner_passes_the_folder_sampling_interval_to_the_worker(tm
     seen = []
     monkeypatch.setattr(
         "cih_analyzer.scheduler.subprocess_runner",
-        lambda path, timeout, stop, sample_interval=None, progress=None, survey_interval=None: (
+        lambda path, timeout, stop, sample_interval=None, progress=None, survey_interval=None, **_: (
             seen.append((path, sample_interval)) or RunResult(skip="iso")
         ),
     )
@@ -462,7 +462,7 @@ def test_the_default_runner_passes_the_survey_interval_to_the_worker(
     seen = []
     monkeypatch.setattr(
         "cih_analyzer.scheduler.subprocess_runner",
-        lambda path, timeout, stop, sample_interval=None, progress=None, survey_interval=None: (
+        lambda path, timeout, stop, sample_interval=None, progress=None, survey_interval=None, **_: (
             seen.append(survey_interval) or RunResult(skip="iso")
         ),
     )

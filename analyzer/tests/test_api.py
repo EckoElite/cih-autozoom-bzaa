@@ -157,6 +157,24 @@ def test_a_missing_timeline_is_a_404_and_analyze_queues_it_at_demand_priority(ap
     assert store.get(other_local)["priority"] == PRIORITY_PLAYER  # `analyze=1` is what a player sends
 
 
+def test_a_title_being_surveyed_answers_404_with_what_the_survey_knows_so_far(api):
+    client, store, sched, root, local = api
+    other = root / "Surveyed.mkv"
+    other.write_bytes(b"s" * 5)
+    sched.scan_now()
+    where = str(other).replace("\\", "/")
+    plain = client.get("/api/v1/timeline", params={"path": where}).json()
+    assert "provisional" not in plain
+    sched._set_provisional(where, {"provisional": True, "coverage": [[40.0, 70.0]], "segments": []})
+    answer = client.get("/api/v1/timeline", params={"path": where})
+    assert answer.status_code == 404 and answer.json()["provisional"]["coverage"] == [[40.0, 70.0]]
+    assert answer.json()["provisional"]["override"] is None  # the manual choice for the title travels with it
+    # the playhead position is accepted on both routes
+    assert client.post("/api/v1/analyze", json={"path": where, "at": 125.5}).json()["status"] == "queued"
+    assert client.get("/api/v1/timeline", params={"path": where, "analyze": 1, "at": 90}).status_code == 404
+    assert client.get("/api/v1/timeline", params={"path": where, "at": -1}).status_code == 422
+
+
 def test_a_post_to_analyze_is_a_player_request_unless_it_says_it_was_made_by_hand(api):
     client, store, sched, root, local = api
     first, second = root / "First.mkv", root / "Second.mkv"

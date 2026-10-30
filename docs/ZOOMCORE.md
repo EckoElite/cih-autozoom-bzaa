@@ -75,6 +75,20 @@ the analyzer's playhead-first partial analysis is not built, so a long film wait
 
 When the service starts (once per Kodi start), after the home screen is up, it runs `RunScript(<start_addon>)` (default `script.plexmod`) unless something is already playing or `open_at_start` is off. Kodi's `autoexec.py` did not run on this Kodi, and `RunAddon` opens PM4K as a plugin folder and fails.
 
+## Provisional timelines (a title being analysed for you)
+
+A request from the add-on carries where the player is (`at`). The analyzer's survey then starts there, visits places
+every 8 s forward to the end and then from the start, and after its first 3 places (about 1.5 s of work, 1.7 s from
+the request on a real 4.7 GB episode) and every 4 places after that it writes what it knows. A 404 for the title
+carries it as `provisional`: a timeline-shaped answer in which each steady stretch has its own picture and everything
+else, the odd shot between stretches included, has the whole frame (`provisional.py`). The rectangle errs large (8 px
+at 4K), a stretch needs two places that agree, a bigger picture ends a stretch, two smaller ones in a row start a new
+one, and dark samples claim nothing. The add-on uses it at once, asks every 2 s for its first two minutes (then
+`poll_s`), rebuilds its plan whenever the coverage changes, and switches to the final timeline when it arrives. A
+seek tells the analyzer the new position; if what the survey knows does not cover it and it began over 90 s away, the
+job restarts from there. Measured on *Crystal Lake* S01E08 (a 2.35 picture inside a 16:9 frame): first stretch after
+1.7 s, coverage ahead of the playhead growing about 25 s of film per second, nearly the whole 45 minutes in 90 s.
+
 ## Stop
 
 Stop or end: stop the threads, send zoom 1.0 (Normal), forget the title, so the next file and the menus start clean.

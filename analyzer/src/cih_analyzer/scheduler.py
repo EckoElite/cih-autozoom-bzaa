@@ -37,6 +37,7 @@ from .store import PRIORITY_DEMAND, PRIORITY_PLAYER, Store
 log = logging.getLogger(__name__)
 
 IDLE_POLL_S = 5.0
+REPOSITION_S = 90.0  # a request this far from where a running survey began moves it
 EXPRESS_POLL_S = 2.0  # an express worker looks for a title a player asked for this often
 PAUSED_POLL_S = 15.0
 TRANSCODE_CACHE_S = 30.0
@@ -103,9 +104,12 @@ def subprocess_runner(
     sample_interval: float | None = None,
     progress: Callable[[dict], None] | None = None,
     survey_interval: float | None = None,
+    start_at: float | None = None,
+    on_partial: Callable[[dict], None] | None = None,
 ) -> RunResult:
     """Analyse one file in a child process and parse the envelope it prints. `progress` is called about once a
-    second with the worker's `{"phase", "fraction"}` while it runs."""
+    second with the worker's `{"phase", "fraction"}` while it runs. With `on_partial`, the worker surveys from
+    `start_at` (where a player is) and `on_partial(timeline)` gets each provisional timeline it produces."""
     src = str(Path(__file__).resolve().parents[1])
     env = dict(os.environ)
     env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
@@ -118,10 +122,13 @@ def subprocess_runner(
         cmd += ["--survey-interval", f"{survey_interval:g}"]
     with tempfile.TemporaryDirectory(prefix="cih-job-") as scratch:
         progress_file = Path(scratch, "progress.json")
+        partial_file = Path(scratch, "partial.json")
         if progress is not None:
             cmd += ["--progress-file", str(progress_file)]
+        if on_partial is not None:
+            cmd += ["--partial-file", str(partial_file), "--start-at", f"{start_at or 0.0:g}"]
         cmd += ["--analyze-envelope", path]
-        return _run_worker(cmd, env, timeout, stop, progress, progress_file)
+        return _run_worker(cmd, env, timeout, stop, progress, progress_file, partial_file, on_partial)
 
 
 def _run_worker(
@@ -131,11 +138,14 @@ def _run_worker(
     stop: threading.Event,
     progress: Callable[[dict], None] | None,
     progress_file: Path,
+    partial_file: Path | None = None,
+    on_partial: Callable[[dict], None] | None = None,
 ) -> RunResult:
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         proc = subprocess.Popen(cmd, stdout=out, stderr=err, env=env)  # noqa: S603 - fixed command, no shell
         deadline = time.monotonic() + timeout
         next_report = 0.0
+        partial_seen = 0.0
         while proc.poll() is None:
             if stop.is_set():
                 proc.kill()
@@ -150,6 +160,17 @@ def _run_worker(
                 latest = _read_progress(progress_file)
                 if latest is not None:
                     progress(latest)
+            if on_partial is not None and partial_file is not None:
+                try:
+                    changed = partial_file.stat().st_mtime
+                except OSError:
+                    changed = 0.0
+                if changed > partial_seen:
+                    partial_seen = changed
+                    try:
+                        on_partial(json.loads(partial_file.read_text(encoding="utf-8")))
+                    except (OSError, ValueError):
+                        partial_seen = 0.0  # mid-replace or unreadable: look again next time
             time.sleep(0.2)
         out.seek(0)
         err.seek(0)
@@ -190,6 +211,10 @@ class Scheduler:
         self._progress_lock = threading.Lock()
         self._job_stops: dict[str, threading.Event] = {}  # one per running file, so one can be stopped alone
         self._job_lock = threading.Lock()
+        self._start_at: dict[str, float] = {}  # where a player is, for a title it is waiting for
+        self._provisional: dict[str, dict] = {}  # what the running survey knows so far, by path
+        self._provisional_lock = threading.Lock()
+        self._wake = threading.Event()  # an express worker should look for work now
         self.runner: Runner = runner or (
             lambda path, timeout, stop: subprocess_runner(
                 path,
@@ -198,6 +223,8 @@ class Scheduler:
                 sample_interval=settings.interval_for(path),
                 survey_interval=settings.survey_interval_s,
                 progress=lambda latest: self._set_progress(path, latest),
+                start_at=self._start_at.get(path),
+                on_partial=lambda tl: self._set_provisional(path, tl),
             )
         )
         self.plex = (
@@ -273,6 +300,16 @@ class Scheduler:
                     self._workers[key] = thread
                     thread.start()
 
+    def _set_provisional(self, path: str, timeline: dict) -> None:
+        with self._provisional_lock:
+            self._provisional[path] = timeline
+
+    def provisional_of(self, path: str) -> dict | None:
+        """What the running survey of `path` knows so far, as a provisional timeline (see provisional.py), or None."""
+        with self._provisional_lock:
+            found = self._provisional.get(path)
+            return dict(found) if found else None
+
     def _set_progress(self, path: str, latest: dict) -> None:
         with self._progress_lock:
             self._progress[path] = {**latest, "at": self.clock()}
@@ -327,6 +364,14 @@ class Scheduler:
             return "plex-transcode"
         return None
 
+    def blocked_even_for_players(self) -> str | None:
+        """What stops an express worker: quiet hours and a Plex transcode. A pause by hand does not."""
+        if in_quiet_hours(self.settings.quiet_hours, self.now_local().time()):
+            return "quiet-hours"
+        if self.transcode_active():
+            return "plex-transcode"
+        return None
+
     # ---- the work ------------------------------------------------------------------------------------------------
 
     def run_one(self, max_priority: int | None = None) -> bool:
@@ -356,9 +401,12 @@ class Scheduler:
                 self._job_stops.pop(path, None)
             with self._progress_lock:
                 self._progress.pop(path, None)
+            with self._provisional_lock:
+                self._provisional.pop(path, None)
         if result.error == "stopped":
             self.store.requeue_one_running(path)
             return True
+        self._start_at.pop(path, None)
         try:
             after = os.stat(path)
         except OSError:
@@ -414,7 +462,7 @@ class Scheduler:
         background queue; someone is waiting to watch this),
         but still obeys quiet hours and the Plex-transcode pause."""
         while not self.stop_event.is_set():
-            if self.paused_reason() not in (None, "paused"):
+            if self.blocked_even_for_players():
                 self.stop_event.wait(PAUSED_POLL_S)
                 continue
             try:
@@ -423,7 +471,8 @@ class Scheduler:
                 log.exception("express worker error")
                 worked = False
             if not worked:
-                self.stop_event.wait(EXPRESS_POLL_S)
+                self._wake.wait(EXPRESS_POLL_S)  # `request` wakes it at once
+                self._wake.clear()
 
     # ---- discovery -----------------------------------------------------------------------------------------------
 
@@ -470,15 +519,39 @@ class Scheduler:
                 log.exception("%s failed", name)
             self.stop_event.wait(interval)
 
-    def request(self, path: str, priority: int = PRIORITY_DEMAND) -> str:
-        """Ask for a file to be analysed now: `queued`, `running`, or `unknown` (not a file the scanner has seen)."""
+    def request(self, path: str, priority: int = PRIORITY_DEMAND, at: float | None = None) -> str:
+        """Ask for a file to be analysed now: `queued`, `running`, or `unknown` (not a file the scanner has seen).
+
+        `at` is where a player is in the title: the survey starts there, so the stretch being watched is known first.
+        If the title is already being analysed from somewhere else (a resume that seeked far, a jump forward), the
+        job is stopped and queued again from the new place unless what it knows already covers it."""
         local = self.pathmap.to_local(path)
         row = self.store.get(local)
         if row is None:
             return "unknown"
+        if at is not None and priority <= PRIORITY_PLAYER:
+            if row["status"] == "running" and self._elsewhere(local, at):
+                self._start_at[local] = at
+                with self._job_lock:
+                    stop = self._job_stops.get(local)
+                if stop is not None:
+                    stop.set()  # run_one puts it back in the queue with its priority
+                self._wake.set()
+                return "queued"
+            if row["status"] != "running":
+                self._start_at[local] = at
         if row["status"] == "running":
             return "running"
-        return "queued" if self.store.requeue(local, priority, self.clock()) else "unknown"
+        queued = self.store.requeue(local, priority, self.clock())
+        self._wake.set()
+        return "queued" if queued else "unknown"
+
+    def _elsewhere(self, local: str, at: float) -> bool:
+        """The running survey of `local` has not covered `at` and began far from it."""
+        known = self.provisional_of(local)
+        if known and any(a <= at <= b for a, b in known.get("coverage", [])):
+            return False
+        return abs(self._start_at.get(local, 0.0) - at) > REPOSITION_S
 
     # ---- lifecycle -----------------------------------------------------------------------------------------------
 
@@ -512,6 +585,7 @@ class Scheduler:
 
     def stop(self, timeout: float = 10.0) -> None:
         self.stop_event.set()
+        self._wake.set()
         with self._job_lock:
             for event in self._job_stops.values():
                 event.set()

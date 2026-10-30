@@ -25,6 +25,8 @@ ADDON = xbmcaddon.Addon()
 PROFILE = xbmcvfs.translatePath(ADDON.getAddonInfo("profile"))
 RELOAD_PROPERTY = "service.cih.zoom.reload"  # set on the home window by override.py; read by the main loop
 POLL_FLOOR_S = 5  # the least time between asks while a title has no timeline
+FAST_POLL_S = 2.0  # a title new to the analyzer is asked about this often for its first two minutes
+FAST_POLL_FOR_S = 120.0
 
 
 def log(msg, level=xbmc.LOGINFO):
@@ -79,6 +81,9 @@ class ZoomPlayer(xbmc.Player):
         self.poller = None
         self.stop_flag = threading.Event()
         self.poll_stop = threading.Event()
+        self.nudge = threading.Event()  # the player moved: tell the analyzer where it is now
+        self.provisional = False  # the plan comes from a survey that is still running
+        self.coverage = ()
         self.logfile = None
 
     # --- what Kodi tells us --------------------------------------------------------------------------------------
@@ -103,9 +108,11 @@ class ZoomPlayer(xbmc.Player):
 
     def onPlayBackSeek(self, time_ms, seek_offset):
         self.begin()
+        self.nudge.set()
 
     def onPlayBackSeekChapter(self, chapter):
         self.begin()
+        self.nudge.set()
 
     def onPlayBackSpeedChanged(self, speed):
         # fast forward and rewind break the clock mapping; settle again at normal speed
@@ -147,13 +154,24 @@ class ZoomPlayer(xbmc.Player):
             playing = ""
         # the played URL (it carries the Plex part id) and the library item's own path are both asked about
         self.ident = identify.identify_all(xbmc.getInfoLabel("Player.Filenameandpath"), playing)
-        self.lookup = make_client().timeline(self.ident, ADDON.getSettingBool("request_analysis"))
+        self.lookup = make_client().timeline(
+            self.ident, ADDON.getSettingBool("request_analysis"), at=self.player_time()
+        )
         self.refresh_plan()
         log("title %s, analyzer %s%s" % (self.ident["kind"], self.lookup.status, ", plan ready" if self.plan else ""))
+
+    def player_time(self):
+        """Where the player is, in seconds (0 while it cannot say)."""
+        try:
+            return float(self.getTime())
+        except (RuntimeError, ValueError):
+            return 0.0
 
     def refresh_plan(self):
         timeline = self.lookup.timeline if self.lookup else None
         self.plan = None
+        self.provisional = bool(timeline and timeline.get("provisional"))
+        self.coverage = tuple(tuple(c) for c in (timeline or {}).get("coverage", []))
         if timeline:
             try:
                 self.plan = plan_mod.build_plan(
@@ -177,7 +195,10 @@ class ZoomPlayer(xbmc.Player):
             return
         self.stop_flag.clear()
         if self.plan:
-            self.stop_polling()
+            if self.provisional:
+                self.start_polling()  # exact only over the stretch the survey has seen: keep asking for the rest
+            else:
+                self.stop_polling()
             self.worker = threading.Thread(target=self.work, name="cih-zoom", daemon=True)
             self.worker.start()
             return
@@ -217,31 +238,51 @@ class ZoomPlayer(xbmc.Player):
         if self.poller is not None or self.lookup is None or self.lookup.status in ("unknown",):
             return
         self.poll_stop.clear()
+        self.nudge.clear()
         self.poller = threading.Thread(target=self.poll, name="cih-poll", daemon=True)
         self.poller.start()
 
     def stop_polling(self):
         self.poll_stop.set()
+        self.nudge.set()
         if self.poller and self.poller is not threading.current_thread():
             self.poller.join(0.5)
         self.poller = None
 
     def poll(self):
-        """The title is not analyzed yet (or the analyzer is unreachable): ask again until it is, then switch over."""
-        while not self.poll_stop.wait(max(POLL_FLOOR_S, ADDON.getSettingInt("poll_s"))):
+        """The title has no final timeline yet (not analysed, or the analyzer is unreachable, or only a survey that is
+        still running has seen part of it): ask again, quickly at first, and switch over whenever there is news."""
+        began = time.monotonic()
+        while True:
+            fast = time.monotonic() - began < FAST_POLL_FOR_S
+            moved = self.nudge.wait(FAST_POLL_S if fast else max(POLL_FLOOR_S, ADDON.getSettingInt("poll_s")))
+            self.nudge.clear()
+            if self.poll_stop.is_set():
+                return
             try:
-                lookup = make_client().timeline(self.ident, False)
+                client = make_client()
+                if moved:  # a seek: the survey should work where the player is now
+                    client.request_analysis(self.ident, self.player_time())
+                lookup = client.timeline(self.ident, False)
             except Exception as exc:  # noqa: BLE001 - never let a lookup end the thread
                 log("poll failed: %r" % (exc,), xbmc.LOGWARNING)
                 continue
-            if lookup.timeline:
-                self.lookup = lookup
-                self.refresh_plan()
-                if self.plan:
-                    self.poller = None
-                    self.begin()
-                    return
-
+            if not lookup.timeline:
+                continue
+            provisional = bool(lookup.timeline.get("provisional"))
+            coverage = tuple(tuple(c) for c in lookup.timeline.get("coverage", []))
+            if provisional and self.provisional and coverage == self.coverage:
+                continue  # the survey has found nothing new
+            self.lookup = lookup
+            self.refresh_plan()
+            if not self.plan:
+                continue
+            self.emit({"kind": "timeline", "provisional": provisional, "coverage": [list(c) for c in coverage]})
+            if not provisional:
+                self.poller = None
+            self.begin()  # carry on from the current position with the new plan
+            if not provisional:
+                return
     # --- worker --------------------------------------------------------------------------------------------------
     def open_log(self):
         if self.logfile is None:

@@ -19,6 +19,7 @@ from .coarse import coarse_scan, limit_for
 from .fingerprint import quick_hash
 from .known import is_known_variable
 from .probe import ProbeError, VideoInfo
+from .provisional import provisional_timeline
 from .refine import RefineParams, RefineResult, refine
 from .schema import (
     Active,
@@ -179,12 +180,17 @@ def analyze_file(
     survey_interval_s: float | None = None,
     known_variable_file: str = "",
     progress: Callable[[str, float], None] | None = None,
+    start_at: float = 0.0,
+    on_partial: Callable[[dict], None] | None = None,
 ) -> Analysis:
     """Analyze one file. Skipped files (ISO, 3D, extras, audio-only, broken) come back with a reason, not an error;
     anything else that goes wrong while decoding raises `ProbeError`.
 
     With `survey_interval_s` the file is first surveyed (one keyframe every that many seconds, found by seeking);
-    a file that shows one picture throughout skips the detailed pass that reads every keyframe."""
+    a file that shows one picture throughout skips the detailed pass that reads every keyframe.
+
+    With `on_partial`, the survey starts at `start_at` (where a player is) and `on_partial(timeline)` is called with a
+    provisional timeline as soon as the survey knows the stretch around it, and again as it learns more."""
     path = os.fspath(path)
     inspected = inspect_file(path, skip_config or SkipConfig())
     if inspected.info is None:
@@ -193,7 +199,11 @@ def analyze_file(
     seg_params = seg_params or SegmentationParams()
     scan_args = {} if sample_interval_s is None else {"min_interval_s": sample_interval_s}
     known = survey_interval_s is not None and is_known_variable(path, known_variable_file)
-    surveying = survey_interval_s is not None and not known and worth_surveying(info, survey_interval_s)
+    surveying = (
+        survey_interval_s is not None
+        and (not known or on_partial is not None)
+        and worth_surveying(info, survey_interval_s)
+    )
 
     def stage(phase: str, base: float, span: float) -> Callable[[float], None] | None:
         """Report `phase` as part of the whole bar (an estimate; which part takes longer depends on the film)."""
@@ -201,12 +211,25 @@ def analyze_file(
             return None
         return lambda share: progress(phase, base + span * min(1.0, max(0.0, share)))
 
+    on_batch = None
+    if on_partial is not None:
+
+        def on_batch(by_slot, where):
+            found = provisional_timeline(info, by_slot, where)
+            if found is not None:
+                on_partial(found)
+
     verdict = None
     if surveying:
         try:
             verdict = judge(
                 survey_scan(
-                    path, info, interval=survey_interval_s, progress=stage("surveying", 0.0, SURVEY_SHARE)
+                    path,
+                    info,
+                    interval=survey_interval_s,
+                    progress=stage("surveying", 0.0, SURVEY_SHARE),
+                    start_at=start_at,
+                    on_batch=on_batch,
                 ),
                 info,
                 seg_params,
@@ -216,6 +239,8 @@ def analyze_file(
             verdict = (
                 None  # an unreadable survey decides nothing; the detailed pass either copes or reports it
             )
+    if known:
+        verdict = None  # the list says this title changes ratio: the survey only served the player meanwhile
     if verdict is not None and verdict.constant:
         coarse = CoarseResult((verdict.segment,), (), ("surveyed",), {"survey": verdict.usable})
         checking = stage("checking", SURVEY_SHARE, 1.0 - SURVEY_SHARE)
