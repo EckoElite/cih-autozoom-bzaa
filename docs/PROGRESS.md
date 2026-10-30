@@ -240,7 +240,9 @@ Spec: `docs/ZOOMCORE.md`. Built and tested on this PC only (48 add-on tests with
 
 **Read-only look at the Shield while PM4K played *Buddy* (the user pressed play; I only queried Kodi's JSON-RPC):** PM4K plays a Plex *part* URL with the part id in its path (`/library/parts/551450/<ts>/`), while the item's own path is the Plex path `/movies/...`; Kodi's size labels carry thousands separators (`3,840`). **Finding:** the analyzer had no Plex ids for movies at all (only the 1,430 music videos matched), because Plex's `/movies/...` is under no `PATH_MAP` rule, so a lookup by part id would have returned 404 for every movie. Fixed in analyzer 0.3.8 (not pushed): the sync now matches a Plex path to a scanned file by folder and file name when no rule covers it, and never guesses between two files.
 
-**Not done:** install on the Shield (needs the user's go-ahead), `getPlayingFile()` vs `Player.Filenameandpath` under PM4K, wrong-zoom time at start and after a seek, the override button (the user chooses), `edge_bias` default confirmation (`no_spill` unless told otherwise), vertical-shift units, T5 and T6 on the Shield.
+**Installed on the Shield (2026-10-30, with the user's go-ahead):** the old prototype (0.1.0) was removed and add-on 0.2.0 pushed with `adb push` into Kodi's addons folder, its settings file (analyzer URL and API key; not in the repo) into `userdata/addon_data/service.cih.zoom/`, and Kodi restarted. Verified: Kodi lists `service.cih.zoom` 0.2.0 as enabled, and `kodi.log` shows `[service.cih.zoom] started` with no error from it (the one traceback in the log belongs to the unrelated `script.toolbox`). No title has been played with it yet. Until analyzer 0.3.8 runs on the NAS, a movie lookup returns 404 (no Plex ids), so a played movie gets the fallback.
+
+**Not done:** `getPlayingFile()` vs `Player.Filenameandpath` under PM4K, wrong-zoom time at start and after a seek, the override button (the user chooses), `edge_bias` default confirmation (`no_spill` unless told otherwise), vertical-shift units, T5 and T6 on the Shield.
 
 ## Decision (2026-10-29): hybrid analysis
 
