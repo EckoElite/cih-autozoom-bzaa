@@ -99,7 +99,7 @@ def survey_scan(
     seeks fail (a damaged file); a few failures are skipped.
 
     The places are visited from `start_at` (where a player is) to the end of the file, then from the start up to
-    `start_at`. `on_batch(samples_by_slot, where)` is called early (after 3 places, then every 4) so a caller can use
+    `start_at`. `on_batch(samples_by_slot, where)` is called early (after each of the first 5 places, then every 4) so a caller can use
     what is known about the stretch around `start_at` long before the survey is done; `where` says how far each
     direction has got: `{"step", "slots", "first", "forward", "wrapped"}`."""
     exe = shutil.which("ffmpeg")
@@ -122,7 +122,7 @@ def survey_scan(
             by_slot[slot] = got
             for sample in got:
                 found.setdefault(round(sample.t, 2), sample)
-        if on_batch and (n == 3 or (n > 3 and (n - 3) % 4 == 0) or n == slots):
+        if on_batch and (n <= 5 or (n - 5) % 4 == 0 or n == slots):
             forward = min(n, slots - first)
             on_batch(
                 dict(by_slot),

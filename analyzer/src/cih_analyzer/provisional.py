@@ -27,6 +27,9 @@ from .survey import BRIGHT_YAVG, MIN_PICTURE_AREA, _lopsided
 
 MIN_BRIGHT = 2  # bright samples needed before anything is claimed
 MIN_VOUCHING_SLOTS = 2  # and they must come from at least this many places, so one odd shot claims nothing
+BLACK_YAVG = (
+    22.0  # a sample darker than this is a black frame (a fade, a gap): it shows nothing that could overhang
+)
 Rect = tuple[int, int, int, int]
 
 
@@ -46,16 +49,18 @@ class _Run:
     slots: list[int] = field(default_factory=list)
     vouched: list[int] = field(default_factory=list)
     bright: list[Sample] = field(default_factory=list)
+    counts: Counter = field(default_factory=Counter)  # the rectangles of `bright`, counted as they come
 
     @property
     def rect(self) -> Rect:
-        return Counter(_rect(s) for s in self.bright).most_common(1)[0][0]
+        return self.counts.most_common(1)[0][0]
 
     def add(self, slot: int, here: list[Sample]) -> None:
         self.slots.append(slot)
         if here:
             self.vouched.append(slot)
             self.bright.extend(here)
+            self.counts.update(_rect(s) for s in here)
 
     def valid(self) -> bool:
         return len(self.vouched) >= MIN_VOUCHING_SLOTS and len(self.bright) >= MIN_BRIGHT
@@ -117,6 +122,51 @@ def _runs(info: VideoInfo, by_slot: dict[int, list[Sample]], order: list[int]) -
     return finished
 
 
+def _safe(samples: list[Sample], rect: Rect, info: VideoInfo) -> bool:
+    """True if nothing a slot's samples show can overhang the screen when `rect` is zoomed to fit it: every sample is a
+    black frame, or its crop lies inside `rect` (the visible picture is within the matte, whatever its brightness; a dark
+    scene's crop is smaller than the real picture, never bigger). Such a slot proves nothing about the picture, but it
+    cannot be hurt by the zoom, so a stretch may run on through it: a fade in, a dim opening, the credits."""
+    if not samples:
+        return False  # the seek failed: nothing known
+    tol_x, tol_y = 0.01 * info.width, 0.01 * info.height
+    x, y, w, h = rect
+    return all(
+        s.w <= 0
+        or s.h <= 0
+        or s.yavg < BLACK_YAVG
+        or (
+            s.x >= x - tol_x
+            and s.y >= y - tol_y
+            and s.x + s.w <= x + w + tol_x
+            and s.y + s.h <= y + h + tol_y
+        )
+        for s in samples
+    )
+
+
+def _extended(
+    core: list[int],
+    rect: Rect,
+    by_slot: dict[int, list[Sample]],
+    order: list[int],
+    taken: set[int],
+    info: VideoInfo,
+) -> list[int]:
+    """`core` (a run's vouched slots) plus the safe slots just before it and just after it in survey order."""
+    where = {slot: i for i, slot in enumerate(order)}
+    slots = list(core)
+    i = where[core[0]] - 1
+    while i >= 0 and order[i] not in taken and _safe(by_slot.get(order[i], []), rect, info):
+        slots.append(order[i])
+        i -= 1
+    i = where[core[-1]] + 1
+    while i < len(order) and order[i] not in taken and _safe(by_slot.get(order[i], []), rect, info):
+        slots.append(order[i])
+        i += 1
+    return slots
+
+
 def _intervals(slots: list[int], step: float, duration: float) -> list[tuple[float, float]]:
     """The time spans of a set of slots, neighbouring slots joined."""
     spans: list[list[int]] = []
@@ -140,11 +190,16 @@ def provisional_timeline(info: VideoInfo, by_slot: dict[int, list[Sample]], wher
     step = float(where["step"])
     margin = 2 * -(-info.width // 960)  # the coarse pass is good to a couple of pixels of its 960-wide frame
     placed: list[tuple[float, float, Rect]] = []
+    order = [s for s in visited if s < slots]
+    taken = {slot for run in runs for slot in run.trimmed()}  # no run takes another's slots when it runs on
     for run in runs:
         x, y, w, h = run.rect
         x0, y0 = max(0, x - margin), max(0, y - margin)
         x1, y1 = min(info.width, x + w + margin), min(info.height, y + h + margin)
-        for a, b in _intervals(run.trimmed(), step, info.duration):
+        core = [s for s in run.trimmed() if s in run.vouched or _safe(by_slot.get(s, []), run.rect, info)]
+        covered = _extended(core, run.rect, by_slot, order, taken, info)
+        taken.update(covered)
+        for a, b in _intervals(covered, step, info.duration):
             placed.append((a, b, (x0, y0, x1 - x0, y1 - y0)))
     placed.sort()
     whole: Rect = (0, 0, info.width, info.height)

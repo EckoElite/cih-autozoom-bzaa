@@ -111,6 +111,39 @@ def test_a_lopsided_bigger_sample_is_a_subtitle_not_a_new_picture():
     assert found["coverage"] == [[40.0, 70.0]]
 
 
+def test_a_dim_or_black_opening_inside_the_same_matte_is_covered_too():
+    # S01E05 of a real show: a black fade in, a title in a dim shot, then the picture. Nothing in the opening can
+    # overhang the screen when the 2.35 matte is zoomed to fit, so waiting for bright samples would only delay the zoom
+    matte = (0, 277, 3840, SCOPE_H)
+    seen = {
+        0: [
+            Sample(2.0, 3832, 2152, -3824, -2144, 16.0),
+            Sample(4.0, 840, 616, 2160, 928, 29.0, 104),
+        ],  # black, a dim title
+        1: [Sample(10.0, *matte, 39.0), Sample(12.0, *matte, 30.0)],  # dim, but exactly the matte
+        2: slot_samples(2, 2.39),
+        3: slot_samples(3, 2.39),
+    }
+    found = provisional_timeline(INFO, seen, where(first=0, forward=4))
+    assert found["coverage"] == [[0.0, 40.0]]  # from the first second, not from the first bright slot
+
+
+def test_the_stretch_runs_on_through_the_credits_but_not_through_a_bigger_dark_picture():
+    seen = {k: slot_samples(k, 2.39) for k in (2, 3)}
+    seen[4] = [
+        Sample(45.0, 1000, 900, 1400, 300, 60.0),
+        Sample(46.0, 1000, 900, 1400, 300, 60.0),
+    ]  # a few lines of credits
+    seen[5] = [
+        Sample(55.0, 0, 0, 3840, 2160, 30.0),
+        Sample(56.0, 0, 0, 3840, 2160, 30.0),
+    ]  # dim, and the whole frame
+    seen[6] = slot_samples(6, 2.39)
+    found = provisional_timeline(INFO, seen, where(first=2, forward=5))
+    # the credits are covered; the dim full-frame slot is not, but the stretch picks up again after it
+    assert found["coverage"] == [[20.0, 50.0], [60.0, 70.0]]
+
+
 @NEEDS_FFMPEG
 class TestOnVideo:
     SCOPE = rect_for_ratio(2.39, 640, 360)
@@ -129,7 +162,17 @@ class TestOnVideo:
             on_batch=lambda by, w: reports.append((dict(w), sorted(by))),
         )
         first, details = reports[0]
-        assert first["first"] == 12 and first["forward"] == 3 and details == [12, 13, 14]
+        assert (
+            first["first"] == 12 and first["forward"] == 1 and details == [12]
+        )  # a report after every one of the first five
+        assert [r[0]["forward"] for r in reports[:6]] == [
+            1,
+            2,
+            3,
+            4,
+            5,
+            8,
+        ]  # (the ninth place is the first after the end, so "forward" stops at 8)
         assert reports[-1][0]["forward"] + reports[-1][0]["wrapped"] == 20  # every place visited in the end
 
     def test_a_worker_reports_a_provisional_timeline_and_still_finishes_the_file(self, tmp_path):
