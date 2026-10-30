@@ -25,7 +25,7 @@ from . import __version__
 from .config import Settings
 from .pathmap import PathMap, normalize
 from .scheduler import MAX_WORKERS, Scheduler
-from .store import PRIORITY_DEMAND, Store
+from .store import PRIORITY_DEMAND, PRIORITY_PLAYER, Store
 
 PAGE = Path(__file__).with_name("web") / "index.html"
 LIST_LIMIT = 200
@@ -38,6 +38,13 @@ class Target(BaseModel):
     part_id: int | None = None
     rating_key: int | None = None
     hash: str | None = Field(default=None, min_length=40, max_length=40)
+
+
+class AnalyzeBody(Target):
+    """`source: "player"` says a player is waiting for the title (it goes to an express worker); anything else is a
+    request made by hand and waits its turn like the rest of the queue."""
+
+    source: str | None = None
 
 
 class OverrideBody(Target):
@@ -93,15 +100,16 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
             return False  # not mounted here: serve what we have
         return stat.st_size != row["size"] or abs(stat.st_mtime - row["mtime"]) > 1e-3
 
-    def queue_for(row: dict[str, Any] | None, local: str | None) -> str:
+    def queue_for(row: dict[str, Any] | None, local: str | None, player: bool = False) -> str:
+        priority = PRIORITY_PLAYER if player else PRIORITY_DEMAND
         if local is None:
             return "unknown"
         if row is None:
             if not (under_media_root(local) and os.path.isfile(local)):
                 return "unknown"
             stat = os.stat(local)
-            store.seen(local, stat.st_size, stat.st_mtime, version=__version__, priority=PRIORITY_DEMAND)
-        return scheduler.request(local, PRIORITY_DEMAND)
+            store.seen(local, stat.st_size, stat.st_mtime, version=__version__, priority=priority)
+        return scheduler.request(local, priority)
 
     @app.get("/health")
     def health() -> JSONResponse:
@@ -139,7 +147,7 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
             return JSONResponse(body, headers={"X-Cih-Status": status})
         if row and row["timeline"]:
             status = "stale"
-        queued = queue_for(row, local) if analyze else None
+        queued = queue_for(row, local, player=True) if analyze else None  # `analyze=1` is what a player sends
         return JSONResponse(
             {"detail": "no timeline", "status": status, "queue": queued},
             status_code=404,
@@ -147,9 +155,9 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
         )
 
     @app.post("/api/v1/analyze", dependencies=secured)
-    def analyze(target: Target) -> dict[str, Any]:
+    def analyze(target: AnalyzeBody) -> dict[str, Any]:
         row, local = resolve(target)
-        return {"path": local, "status": queue_for(row, local)}
+        return {"path": local, "status": queue_for(row, local, player=target.source == "player")}
 
     @app.get("/api/v1/override", dependencies=secured)
     def get_override(

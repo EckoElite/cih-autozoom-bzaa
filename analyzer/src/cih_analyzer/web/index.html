@@ -165,7 +165,7 @@ async function json(path, opts) {
   return r.status === 404 ? null : r.json();
 }
 const when = (t) => t ? new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
-const PRIORITY = ["on demand", "recent", "backlog"];
+const PRIORITY = { "-1": "playing now", 0: "on demand", 1: "recent", 2: "backlog" };
 
 // "/media/movies/Dunkirk (2017)/Dunkirk (2017) 4k HDR.mkv" -> name "Dunkirk (2017) 4k HDR", folder "movies / Dunkirk (2017)"
 function labels(r) {
@@ -203,7 +203,7 @@ function runningCard(r) {
 }
 function queuedCard(r) {
   return el("div", { className: "job queued" }, nameBlock(r),
-    el("div", { className: "meta" }, el("span", { className: "chip" + (r.priority === 0 ? " demand" : ""), textContent: PRIORITY[r.priority] }), span("queued " + when(r.queued_at))));
+    el("div", { className: "meta" }, el("span", { className: "chip" + (r.priority <= 0 ? " demand" : ""), textContent: PRIORITY[r.priority] }), span("queued " + when(r.queued_at))));
 }
 
 function fill(list, cards) { list.textContent = ""; for (const c of cards) list.append(c); }

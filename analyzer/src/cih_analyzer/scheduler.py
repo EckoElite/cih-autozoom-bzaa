@@ -32,7 +32,7 @@ from .config import Settings, in_quiet_hours
 from .pathmap import PathMap
 from .plex import PlexClient, PlexError, redact
 from .scanner import PlexSummary, ScanSummary, scan_media, sync_plex
-from .store import PRIORITY_DEMAND, Store
+from .store import PRIORITY_DEMAND, PRIORITY_PLAYER, Store
 
 log = logging.getLogger(__name__)
 
@@ -330,7 +330,7 @@ class Scheduler:
     # ---- the work ------------------------------------------------------------------------------------------------
 
     def run_one(self, max_priority: int | None = None) -> bool:
-        """Take and run the most urgent job (only one a player asked for, with `max_priority=0`). Returns False if
+        """Take and run the most urgent job (only one a player is waiting for, with `max_priority=PRIORITY_PLAYER`). Returns False if
         there was nothing to do."""
         job = self.store.claim_next(self.clock(), max_priority)
         if job is None:
@@ -409,15 +409,16 @@ class Scheduler:
                 self.stop_event.wait(IDLE_POLL_S)
 
     def _express_worker(self) -> None:
-        """Takes only titles a player asked for, so one is not kept waiting behind a film that takes hours. It runs
-        while analysis is paused by hand (a pause is about the background queue; someone is waiting to watch this),
+        """Takes only titles a player is waiting for (not a re-queue made by hand: that waits like the rest), so one is not
+        kept waiting behind a film that takes hours. It runs while analysis is paused by hand (a pause is about the
+        background queue; someone is waiting to watch this),
         but still obeys quiet hours and the Plex-transcode pause."""
         while not self.stop_event.is_set():
             if self.paused_reason() not in (None, "paused"):
                 self.stop_event.wait(PAUSED_POLL_S)
                 continue
             try:
-                worked = self.run_one(max_priority=PRIORITY_DEMAND)
+                worked = self.run_one(max_priority=PRIORITY_PLAYER)
             except Exception:  # noqa: BLE001
                 log.exception("express worker error")
                 worked = False

@@ -7,7 +7,7 @@ from cih_analyzer.config import Settings
 from cih_analyzer.pathmap import PathMap
 from cih_analyzer.scanner import scan_media
 from cih_analyzer.scheduler import RunResult, Scheduler
-from cih_analyzer.store import PRIORITY_BACKLOG, PRIORITY_DEMAND, Store
+from cih_analyzer.store import PRIORITY_DEMAND, PRIORITY_PLAYER, Store
 
 HASH = "b" * 40
 
@@ -96,9 +96,11 @@ def test_claim_next_can_be_limited_to_what_a_player_asked_for(tmp_path):
     store = Store(tmp_path / "s.sqlite")
     scan_media([movies], store, "0.3.8")
     assert store.claim_next(max_priority=PRIORITY_DEMAND) is None  # only backlog work is queued
-    store.requeue(f"{movies}/m2.mkv", PRIORITY_DEMAND)
-    assert store.claim_next(max_priority=PRIORITY_DEMAND)["path"].endswith("m2.mkv")
-    assert store.get(f"{movies}/m1.mkv")["priority"] == PRIORITY_BACKLOG
+    store.requeue(f"{movies}/m1.mkv", PRIORITY_DEMAND)  # a re-queue made by hand is not a player waiting
+    assert store.claim_next(max_priority=PRIORITY_PLAYER) is None
+    store.requeue(f"{movies}/m2.mkv", PRIORITY_PLAYER)
+    assert store.claim_next(max_priority=PRIORITY_PLAYER)["path"].endswith("m2.mkv")
+    assert store.get(f"{movies}/m1.mkv")["priority"] == PRIORITY_DEMAND  # still queued, still by hand
     store.close()
 
 
@@ -132,7 +134,7 @@ def test_the_express_worker_serves_a_request_while_every_background_worker_is_bu
     sched.start()
     try:
         assert sched.paused_reason() == "paused"
-        assert sched.request(f"{tv}/s01e02.mkv", PRIORITY_DEMAND) == "queued"
+        assert sched.request(f"{tv}/s01e02.mkv", PRIORITY_PLAYER) == "queued"
         assert wait_for(
             lambda: store.get(f"{tv}/s01e02.mkv")["status"] == "done"
         )  # served although paused by hand
@@ -141,7 +143,7 @@ def test_the_express_worker_serves_a_request_while_every_background_worker_is_bu
         # a hand pause is lifted, the background workers take the films and hold them; a new request still goes through
         sched.resume()
         assert wait_for(lambda: any(p.startswith(movies) for p in started))
-        assert sched.request(f"{tv}/s01e01.mkv", PRIORITY_DEMAND) == "queued"
+        assert sched.request(f"{tv}/s01e01.mkv", PRIORITY_PLAYER) == "queued"
         assert wait_for(lambda: store.get(f"{tv}/s01e01.mkv")["status"] == "done")
     finally:
         release.set()
@@ -164,9 +166,37 @@ def test_the_express_worker_leaves_background_work_alone_and_obeys_quiet_hours(t
     sched.scan_now()
     sched.start()
     try:
-        sched.request(f"{movies}/m1.mkv", PRIORITY_DEMAND)
+        sched.request(f"{movies}/m1.mkv", PRIORITY_PLAYER)
         time.sleep(0.6)
         assert ran == []  # quiet hours: even a request waits
+    finally:
+        sched.stop(2)
+        store.close()
+
+
+def test_a_requeue_made_by_hand_waits_for_resume_and_does_not_take_the_express_lane(tmp_path, monkeypatch):
+    # what happened with Oppenheimer: re-queued from the status page while paused, it must not start by itself, and
+    # it must not occupy the express worker that a player's request needs
+    monkeypatch.setattr("cih_analyzer.scheduler.PAUSED_POLL_S", 0.1)
+    movies, tv = libraries(tmp_path)
+    store = Store(tmp_path / "s.sqlite")
+    settings = Settings(config_dir=tmp_path, media_roots=(movies, tv), on_demand_roots=(tv,), scan_interval_s=3600,
+                        plex_interval_s=3600, express_workers=1, start_paused=True)  # fmt: skip
+    ran = []
+    sched = Scheduler(
+        settings, store, PathMap(), runner=lambda p, t, s: ran.append(p) or RunResult(timeline=timeline(p))
+    )
+    sched.scan_now()
+    sched.start()
+    try:
+        sched.request(f"{movies}/m1.mkv", PRIORITY_DEMAND)  # by hand
+        time.sleep(0.6)
+        assert ran == [] and store.get(f"{movies}/m1.mkv")["status"] == "queued"
+        sched.request(f"{tv}/s01e01.mkv", PRIORITY_PLAYER)  # a player is waiting
+        assert wait_for(lambda: store.get(f"{tv}/s01e01.mkv")["status"] == "done")
+        assert ran == [f"{tv}/s01e01.mkv"]
+        sched.resume()
+        assert wait_for(lambda: store.get(f"{movies}/m1.mkv")["status"] == "done")  # it runs once resumed
     finally:
         sched.stop(2)
         store.close()

@@ -17,7 +17,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-PRIORITY_DEMAND = 0  # a player asked for it
+PRIORITY_PLAYER = -1  # a player is waiting for it now: express workers take only these
+PRIORITY_DEMAND = 0  # asked for by hand (a re-queue from the status page or the API)
 PRIORITY_RECENT = 1  # recently added to Plex
 PRIORITY_BACKLOG = 2
 
@@ -225,12 +226,12 @@ class Store:
 
     def claim_next(self, now: float | None = None, max_priority: int | None = None) -> dict[str, Any] | None:
         """Take the most urgent queued file and mark it running: on-demand first, then recently added, then the
-        backlog newest first. With `max_priority`, only files at least that urgent (0: only what a player asked for)."""
+        backlog newest first. With `max_priority`, only files at least that urgent (`PRIORITY_PLAYER`: only what a player is waiting for)."""
         now = time.time() if now is None else now
         with self._lock:
             row = self._one(
                 "SELECT path FROM files WHERE status='queued' AND priority <= ? ORDER BY priority ASC, "
-                "CASE WHEN priority = 0 THEN queued_at ELSE -mtime END ASC LIMIT 1",
+                "CASE WHEN priority <= 0 THEN queued_at ELSE -mtime END ASC LIMIT 1",
                 (99 if max_priority is None else max_priority,),
             )
             if row is None:

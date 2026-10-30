@@ -290,7 +290,7 @@ def open_start_addon(monitor):
     while not xbmc.getCondVisibility("Window.IsActive(home)") and waited < 30 and not monitor.abortRequested():
         monitor.waitForAbort(0.5)
         waited += 0.5
-    if monitor.waitForAbort(2.0) or xbmc.getCondVisibility("Player.HasMedia"):
+    if monitor.waitForAbort(0.3) or xbmc.getCondVisibility("Player.HasMedia"):  # a short settle; PM4K's own start-up is the rest
         return
     log("opening %s (home screen after %.1f s)" % (addon_id, waited))
     xbmc.executebuiltin("RunScript(%s)" % addon_id)  # RunAddon would open PM4K as a (failing) plugin folder

@@ -10,7 +10,7 @@ from cih_analyzer.api import create_app
 from cih_analyzer.config import Settings
 from cih_analyzer.pathmap import PathMap
 from cih_analyzer.scheduler import RunResult, Scheduler
-from cih_analyzer.store import PRIORITY_DEMAND, Store
+from cih_analyzer.store import PRIORITY_DEMAND, PRIORITY_PLAYER, Store
 
 HASH = "b" * 40
 TIMELINE = {
@@ -154,7 +154,20 @@ def test_a_missing_timeline_is_a_404_and_analyze_queues_it_at_demand_priority(ap
     assert r.status_code == 404 and r.json() == {"detail": "no timeline", "status": "queued", "queue": None}
     r = client.get("/api/v1/timeline", params={"path": other_local, "analyze": 1})
     assert r.status_code == 404 and r.json()["queue"] == "queued"
-    assert store.get(other_local)["priority"] == PRIORITY_DEMAND
+    assert store.get(other_local)["priority"] == PRIORITY_PLAYER  # `analyze=1` is what a player sends
+
+
+def test_a_post_to_analyze_is_a_hand_request_unless_it_says_a_player_sent_it(api):
+    client, store, sched, root, local = api
+    first, second = root / "First.mkv", root / "Second.mkv"
+    first.write_bytes(b"1" * 5)
+    second.write_bytes(b"2" * 5)
+    sched.scan_now()
+    a, b = (str(f).replace("\\", "/") for f in (first, second))
+    assert client.post("/api/v1/analyze", json={"path": a}).json()["status"] == "queued"
+    assert store.get(a)["priority"] == PRIORITY_DEMAND
+    assert client.post("/api/v1/analyze", json={"path": b, "source": "player"}).json()["status"] == "queued"
+    assert store.get(b)["priority"] == PRIORITY_PLAYER
 
 
 def test_a_new_file_on_a_media_root_is_picked_up_on_demand_but_other_paths_are_not(api):
@@ -163,7 +176,7 @@ def test_a_new_file_on_a_media_root_is_picked_up_on_demand_but_other_paths_are_n
     fresh.write_bytes(b"z" * 7)
     fresh_local = str(fresh).replace("\\", "/")
     r = client.get("/api/v1/timeline", params={"path": fresh_local, "analyze": 1})
-    assert r.json()["queue"] == "queued" and store.get(fresh_local)["priority"] == PRIORITY_DEMAND
+    assert r.json()["queue"] == "queued" and store.get(fresh_local)["priority"] == PRIORITY_PLAYER
     outside = client.get("/api/v1/timeline", params={"path": "/etc/passwd", "analyze": 1}).json()
     assert outside["queue"] == "unknown" and store.get("/etc/passwd") is None
     sneaky = client.get(

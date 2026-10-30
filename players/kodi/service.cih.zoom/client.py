@@ -85,7 +85,9 @@ class AnalyzerClient:
     def request_analysis(self, ident: dict) -> bool:
         """Queue the title at priority. Returns False if the request could not be made."""
         try:
-            with self._request("POST", "/api/v1/analyze", None, {k: v for k, v in ident.items() if v and k != "kind"}):
+            body = {k: v for k, v in ident.items() if v and k != "kind"}
+            body["source"] = "player"  # someone is waiting to watch it: the analyzer serves it ahead of the queue
+            with self._request("POST", "/api/v1/analyze", None, body):
                 return True
         except (urllib.error.URLError, OSError, ValueError):
             return False

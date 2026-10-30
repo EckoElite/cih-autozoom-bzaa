@@ -119,7 +119,7 @@ class ClientTests(unittest.TestCase):
         found = self.make(server).timeline(PART)
         self.assertEqual(found.status, "missing")
         self.assertEqual([r[0] for r in server.requests], ["GET", "POST"])
-        self.assertEqual(json.loads(server.requests[1][3]), {"part_id": 7})
+        self.assertEqual(json.loads(server.requests[1][3]), {"part_id": 7, "source": "player"})
         self.assertTrue(server.requests[1][1].endswith("/api/v1/analyze"))
 
     def test_polling_does_not_queue_again(self):
