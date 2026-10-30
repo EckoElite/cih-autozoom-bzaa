@@ -549,6 +549,7 @@ MIN_SEGMENT_S = (
     1.0  # a picture state shorter than this is not worth a zoom change, and is more often a misread
 )
 MIN_EXCURSION_S = 3.0  # a ramp that starts with a cut to a smaller picture must take at least this long
+MIN_PICTURE_SHARE = 0.5  # of the frame's area: a smaller "picture" is content on black, not a picture
 EQUIVALENT_ZOOM = 0.03  # two rectangles whose zoom differs by less than this are the same for playback
 _BAND = (
     3840 / 2.35 / 2160
@@ -672,6 +673,17 @@ def settle(
     def tiny(i: int) -> bool:
         return len(segs) > 1 and segs[i].end - segs[i].start < MIN_SEGMENT_S
 
+    def implausible(i: int) -> bool:
+        """A picture covering under half the frame that was entered by a cut is taken to be content on black (a title
+        card, a few lines of credits), not a picture: zoomed up to fill the screen it would blow that content up, and
+        if it is really a dark scene with something bright in it, the zoom would cut the scene off. A window that
+        grows into the frame (a ramp on either side) is a real picture and stays."""
+        x, y, w, h = segs[i].rect
+        if len(segs) < 2 or w * h >= MIN_PICTURE_SHARE * info.width * info.height:
+            return False
+        beside = [bounds[j] for j in (i - 1, i) if 0 <= j < len(bounds)]
+        return not any(b.kind == "ramp" for b in beside)
+
     def bad(i: int) -> bool:
         b = bounds[i]
         if not _trusted(b):
@@ -700,7 +712,7 @@ def settle(
         merges += 1
     while len(segs) > 1:
         # a segment too short to matter (an end card, a flash) or that could not be read goes into its neighbour
-        k = next((i for i, s in enumerate(segs) if s.verified is False or tiny(i)), None)
+        k = next((i for i, s in enumerate(segs) if s.verified is False or tiny(i) or implausible(i)), None)
         if k is None:
             break
         i = k - 1 if k > 0 else 0

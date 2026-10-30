@@ -211,6 +211,35 @@ def test_an_unsure_cut_whose_placement_would_leave_a_sliver_is_merged():
     assert settle([seg(0, 0.6, SCOPE), seg(0.6, 40, WIDE)], [boundary], INFO)[2] >= 1
 
 
+def test_a_picture_under_half_the_frame_is_content_on_black_and_is_folded_into_its_neighbour():
+    # the shape Grand Budapest Hotel gave: a title card measured as a 674x722 picture before the film begins
+    card = (1500, 700, 674, 722)
+    out_segments, out_boundaries, merges = settle(
+        [seg(0, 14, card), seg(14, 100, SCOPE)], [cut(14.0)], make_info(3840, 2160, duration=100.0)
+    )
+    assert merges == 1 and out_boundaries == [] and len(out_segments) == 1
+    assert (
+        out_segments[0].rect == (0, 276, 3840, 1608) or out_segments[0].rect[2] == 3840
+    )  # never the small one
+
+
+def test_real_windowboxes_and_ultra_wide_pictures_are_not_mistaken_for_content_on_black():
+    windowbox = (384, 216, 3072, 1728)  # 80% by 80%
+    ultrawide = (0, 390, 3840, 1380)  # 2.78:1
+    pillar = (480, 0, 2880, 2160)  # 4:3
+    # each beside a picture it zooms differently from, so only the size rule is being tried
+    for rect, neighbour in ((windowbox, WIDE), (ultrawide, WIDE), (pillar, SCOPE)):
+        _, out_boundaries, merges = settle(
+            [seg(0, 50, rect), seg(50, 100, neighbour)], [cut(50.0)], make_info(3840, 2160, duration=100.0)
+        )
+        assert merges == 0 and len(out_boundaries) == 1
+
+
+def test_a_lone_small_picture_stays_because_there_is_nothing_to_fold_it_into():
+    only = seg(0, 60, (1000, 600, 800, 700))
+    assert settle([only], [], INFO)[0] == [only]
+
+
 def test_a_segment_under_a_second_is_folded_into_its_neighbour():
     segments = [seg(0, 20, WIDE), seg(20, 20.4, IMAX)]
     out_segments, out_boundaries, merges = settle(segments, [cut(20.0)], INFO)
