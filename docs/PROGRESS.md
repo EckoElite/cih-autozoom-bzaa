@@ -255,6 +255,9 @@ Spec: `docs/ZOOMCORE.md`. Built and tested on this PC only (48 add-on tests with
 | 1 (every frame; IMG_8366) | 24 | about 18, uneven | 34% |
 | 2 (IMG_8367) | 12 | 12.0, every gap exactly 83 ms | 100% |
 | 4 (IMG_8368) | 6 | 18.0 | 33% |
+| 12 (IMG_8369) | 2 | 22.0, 9% long gaps (same as normal playback) | 9% |
+
+**Decision (2026-10-30, the user):** after watching all four, the user prefers stride 2 (a steady 12 pictures a second, edge moving every 2 frames) over 1 (uneven), 4 and 12 (full-rate picture but the edge moves in half-second steps of about 13 px). Default amp_stride is now 2. This is a deliberate departure from per-frame ramps (R2) because Kodi's MediaCodec surface cannot do them without dropping frames; it is recorded in the TEST_REPORT as an accepted limit for ramps. Cuts are unaffected.
 
 A zoom held fixed at 0.786 is clean (6% long gaps), so the loss comes from changing the zoom: Kodi (MediaCodec surface) costs about one picture frame per applied zoom change. Stride 1 is no worse than stride 4 and moves the edge more smoothly; larger strides (8 to 12) should show about 21 to 22 pictures per second with the edge moving in steps (prediction, not measured). Per-frame ramps are the spec (R2), so this route cannot meet R2 for ramps on this file; options are with the user.
 

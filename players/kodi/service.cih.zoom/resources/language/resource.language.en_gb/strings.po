@@ -148,5 +148,5 @@ msgid "Ramp update step (frames)"
 msgstr ""
 
 msgctxt "#30057"
-msgid "During a gradual picture change, send a zoom update every this many frames (1 = every frame). Kodi can drop picture frames when asked for a zoom change on every frame; a larger step asks less often."
+msgid "During a gradual picture change, send a zoom update every this many frames (1 = every frame). Kodi on Android loses about one picture frame per zoom change. Measured on a 4K Dolby Vision film: 1 = about 18 pictures a second, uneven; 2 = a steady 12 (the default, chosen by the user); 4 = 18; 12 = 22 but the picture edge moves in half-second steps."
 msgstr ""
