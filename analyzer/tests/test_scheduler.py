@@ -264,6 +264,36 @@ def test_the_worker_count_is_validated_and_does_not_start_workers_before_start(e
     assert sched.set_workers(2) == 2 and sched._workers == {} and calls == []
 
 
+def test_a_running_files_progress_is_reported_and_forgotten_when_it_ends(env):
+    sched, store, root, calls = env
+    seen = {}
+
+    def runner(path, timeout, stop):
+        sched._set_progress(path, {"phase": "reading", "fraction": 0.25})
+        seen["during"] = sched.progress_of(path)
+        return RunResult(timeline=timeline(path))
+
+    sched.runner = runner
+    assert sched.run_one()
+    assert (
+        seen["during"]["phase"] == "reading" and seen["during"]["fraction"] == 0.25 and seen["during"]["at"]
+    )
+    assert sched.progress_of(f"{str(root).replace(chr(92), '/')}/a.mkv") is None
+
+
+def test_unreadable_progress_is_ignored(tmp_path):
+    from cih_analyzer.scheduler import _read_progress
+
+    f = tmp_path / "p.json"
+    assert _read_progress(f) is None  # not written yet
+    f.write_text("{", encoding="utf-8")
+    assert _read_progress(f) is None  # caught mid-write
+    f.write_text('{"phase": "reading"}', encoding="utf-8")
+    assert _read_progress(f) is None
+    f.write_text('{"phase": "checking", "fraction": 0.75}', encoding="utf-8")
+    assert _read_progress(f) == {"phase": "checking", "fraction": 0.75}
+
+
 def test_start_paused_keeps_workers_idle_until_resumed_and_lets_a_file_go_first(tmp_path):
     root = tmp_path / "media"
     root.mkdir()
@@ -326,7 +356,7 @@ def test_the_default_runner_passes_the_folder_sampling_interval_to_the_worker(tm
     seen = []
     monkeypatch.setattr(
         "cih_analyzer.scheduler.subprocess_runner",
-        lambda path, timeout, stop, sample_interval=None: (
+        lambda path, timeout, stop, sample_interval=None, progress=None: (
             seen.append((path, sample_interval)) or RunResult(skip="iso")
         ),
     )
@@ -367,6 +397,12 @@ class TestWorkerProcess:
         assert result.error is None and result.skip is None
         assert [s["boundary"]["frame"] for s in result.timeline["segments"]] == [0, 200]
         assert result.version and result.timeline["file"]["quick_hash"]
+
+    def test_the_subprocess_reports_progress_when_asked(self, tmp_path):
+        reports: list[dict] = []
+        result = subprocess_runner(str(self.film(tmp_path)), 300, threading.Event(), progress=reports.append)
+        assert result.error is None and result.timeline is not None
+        assert all(r["phase"] in ("reading", "checking") and 0 <= r["fraction"] < 1 for r in reports)
 
     def test_skips_are_reported_not_raised(self, tmp_path):
         iso = tmp_path / "disc.iso"

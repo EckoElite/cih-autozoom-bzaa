@@ -83,10 +83,27 @@ def _low_priority_prefix() -> tuple[str, ...]:
     return tuple(prefix)
 
 
+PROGRESS_POLL_S = 1.0
+
+
+def _read_progress(path: Path) -> dict | None:
+    """The worker's latest `{"phase", "fraction"}`, or None if it has not written one (or is mid-replace)."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {"phase": str(data["phase"]), "fraction": float(data["fraction"])}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def subprocess_runner(
-    path: str, timeout: float, stop: threading.Event, sample_interval: float | None = None
+    path: str,
+    timeout: float,
+    stop: threading.Event,
+    sample_interval: float | None = None,
+    progress: Callable[[dict], None] | None = None,
 ) -> RunResult:
-    """Analyse one file in a child process and parse the envelope it prints."""
+    """Analyse one file in a child process and parse the envelope it prints. `progress` is called about once a
+    second with the worker's `{"phase", "fraction"}` while it runs."""
     src = str(Path(__file__).resolve().parents[1])
     env = dict(os.environ)
     env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
@@ -95,10 +112,26 @@ def subprocess_runner(
     log.debug("worker command prefix: %s", _low_priority_prefix() or "(normal priority)")
     if sample_interval is not None:
         cmd += ["--sample-interval", f"{sample_interval:g}"]
-    cmd += ["--analyze-envelope", path]
+    with tempfile.TemporaryDirectory(prefix="cih-job-") as scratch:
+        progress_file = Path(scratch, "progress.json")
+        if progress is not None:
+            cmd += ["--progress-file", str(progress_file)]
+        cmd += ["--analyze-envelope", path]
+        return _run_worker(cmd, env, timeout, stop, progress, progress_file)
+
+
+def _run_worker(
+    cmd: list[str],
+    env: dict[str, str],
+    timeout: float,
+    stop: threading.Event,
+    progress: Callable[[dict], None] | None,
+    progress_file: Path,
+) -> RunResult:
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         proc = subprocess.Popen(cmd, stdout=out, stderr=err, env=env)  # noqa: S603 - fixed command, no shell
         deadline = time.monotonic() + timeout
+        next_report = 0.0
         while proc.poll() is None:
             if stop.is_set():
                 proc.kill()
@@ -108,6 +141,11 @@ def subprocess_runner(
                 proc.kill()
                 proc.wait()
                 return RunResult(error=f"analysis timed out after {timeout:.0f} s")
+            if progress is not None and time.monotonic() >= next_report:
+                next_report = time.monotonic() + PROGRESS_POLL_S
+                latest = _read_progress(progress_file)
+                if latest is not None:
+                    progress(latest)
             time.sleep(0.2)
         out.seek(0)
         err.seek(0)
@@ -144,9 +182,15 @@ class Scheduler:
         self.settings = settings
         self.store = store
         self.pathmap = pathmap
+        self._progress: dict[str, dict] = {}
+        self._progress_lock = threading.Lock()
         self.runner: Runner = runner or (
             lambda path, timeout, stop: subprocess_runner(
-                path, timeout, stop, sample_interval=settings.interval_for(path)
+                path,
+                timeout,
+                stop,
+                sample_interval=settings.interval_for(path),
+                progress=lambda latest: self._set_progress(path, latest),
             )
         )
         self.plex = (
@@ -214,6 +258,17 @@ class Scheduler:
                     self._workers[i] = thread
                     thread.start()
 
+    def _set_progress(self, path: str, latest: dict) -> None:
+        with self._progress_lock:
+            self._progress[path] = {**latest, "at": self.clock()}
+
+    def progress_of(self, path: str) -> dict | None:
+        """What a running file's worker last reported: `{"phase": "reading" | "checking", "fraction", "at"}`.
+        Kept in memory only; a restart starts every running file again anyway."""
+        with self._progress_lock:
+            found = self._progress.get(path)
+            return dict(found) if found else None
+
     # ---- throttling ----------------------------------------------------------------------------------------------
 
     def pause(self) -> None:
@@ -264,6 +319,9 @@ class Scheduler:
             result = self.runner(path, self.settings.analysis_timeout_s, self.stop_event)
         except Exception as exc:  # noqa: BLE001 - a bad file must never stop the worker
             result = RunResult(error=redact(f"{type(exc).__name__}: {exc}"))
+        finally:
+            with self._progress_lock:
+                self._progress.pop(path, None)
         if result.error == "stopped":
             self.store.requeue_running()
             return True

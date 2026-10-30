@@ -14,6 +14,7 @@ Three jobs, all at full resolution and all decoding only short windows of the fi
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
@@ -405,16 +406,26 @@ def refine(
     info: VideoInfo,
     coarse: CoarseResult,
     params: RefineParams = RefineParams(),  # noqa: B008
+    progress: Callable[[float], None] | None = None,
 ) -> RefineResult:
-    """Check the coarse segments, then pin down every boundary."""
+    """Check the coarse segments, then pin down every boundary. `progress` is called with the share of the work done,
+    which counts one step per segment probed and per boundary refined (an estimate: merges can shorten the list)."""
     segments, boundaries = list(coarse.segments), list(coarse.boundaries)
     if not segments:
         return RefineResult((), (), (), coarse.flags)
     dropped: list[tuple[float, float, float]] = []
     corrected: list[float] = []  # start times of segments whose rectangle the probes changed
-    threshold = _file_threshold(path, info, segments)
     size_tol = rect_tolerance(info)
     cache: dict[tuple, SegmentCheck] = {}
+    steps = [0, len(segments) + len(boundaries)]  # done, expected
+
+    def step() -> None:
+        steps[0] += 1
+        steps[1] = max(steps[1], steps[0] + 1)
+        if progress:
+            progress(steps[0] / steps[1])
+
+    threshold = _file_threshold(path, info, segments)
 
     def check(i: int) -> SegmentCheck:
         seg = segments[i]
@@ -423,6 +434,7 @@ def refine(
         key = (seg.start, seg.end, seg.rect, seg.needs_verification, left, right)
         if key not in cache:
             cache[key] = probe_segment(path, info, seg, left, right, threshold, params)
+            step()
         return cache[key]
 
     # 1. segments the coarse pass could not vouch for: refuted ones fold into a neighbour, wrong rectangles are fixed
@@ -474,6 +486,7 @@ def refine(
                 threshold=threshold,
             )  # fmt: skip
         )
+        step()
 
     # 4. segments on the exact boundary times
     out: list[RefinedSegment] = []

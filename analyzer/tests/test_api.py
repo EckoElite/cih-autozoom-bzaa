@@ -97,6 +97,20 @@ def test_the_worker_count_is_set_and_reported_through_the_api(api):
     assert after["concurrency"] == 1 and after["concurrency_saved"] is None
 
 
+def test_the_queue_carries_progress_for_running_files_only(api):
+    client, store, sched, root, local = api
+    other = root / "Other.mkv"
+    other.write_bytes(b"x" * 10)
+    sched.scan_now()
+    claimed = store.claim_next()
+    assert claimed["path"].endswith("Other.mkv")
+    sched._set_progress(claimed["path"], {"phase": "reading", "fraction": 0.4})
+    rows = client.get("/api/v1/queue").json()
+    (running,) = [r for r in rows if r["status"] == "running"]
+    assert running["progress"]["phase"] == "reading" and running["progress"]["fraction"] == 0.4
+    assert all("progress" not in r for r in rows if r["status"] != "running")
+
+
 def test_health_and_the_page_are_served(api):
     client, *_ = api
     body = client.get("/health").json()

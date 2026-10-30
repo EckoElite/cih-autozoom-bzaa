@@ -85,6 +85,26 @@ class TestAnalyzeFile:
         assert load_timeline(capsys.readouterr().out).segments[0].preset == 2.39
         assert main(["--sample-interval", "fast", "--analyze", str(path)]) == 2
 
+    def test_progress_runs_forward_from_reading_the_file_to_checking_the_changes(self, tmp_path):
+        plan = [(SCOPE, 110), (WIDE, 150), (SCOPE, 110)]
+        path = make_video(tmp_path / "var.mp4", [Seg(8, r, level=lv) for r, lv in plan])
+        seen: list[tuple[str, float]] = []
+        analyze_file(path, progress=lambda phase, fraction: seen.append((phase, fraction)))
+        phases = [p for p, _ in seen]
+        assert phases[0] == "reading" and phases[-1] == "checking" and "checking" in phases
+        assert phases == sorted(phases, key=["reading", "checking"].index)  # never back to reading
+        fractions = [f for _, f in seen]
+        assert fractions == sorted(fractions) and 0 <= fractions[0] and fractions[-1] < 1.0
+        assert max(f for p, f in seen if p == "reading") == 0.5  # the first pass fills the first half
+
+    def test_command_line_writes_progress_to_a_file_and_rejects_a_missing_name(self, tmp_path, capsys):
+        path = make_video(tmp_path / "scope.mp4", [Seg(6, SCOPE)])
+        progress = tmp_path / "progress.json"
+        assert main(["--progress-file", str(progress), "--analyze", str(path)]) == 0
+        last = json.loads(progress.read_text(encoding="utf-8"))
+        assert last["phase"] == "checking" and 0.5 < last["fraction"] < 1.0
+        assert main(["--analyze", str(path), "--progress-file"]) == 2
+
     def test_skipped_files_come_back_with_a_reason(self, tmp_path):
         iso = tmp_path / "disc.iso"
         iso.write_bytes(b"x")

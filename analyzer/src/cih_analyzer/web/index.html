@@ -5,27 +5,61 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CIH Analyzer</title>
 <style>
-  :root { --bg:#f6f7f9; --fg:#1b1f24; --muted:#5d6672; --card:#fff; --line:#d9dde3; --accent:#1c6ed5; --bad:#b3261e; --ok:#1d7a3a; --warn:#9a6700; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#12161b; --fg:#e6e9ee; --muted:#9aa4b1; --card:#1a2028; --line:#2c343e; --accent:#6aa8ff; --bad:#ff8a80; --ok:#6fd68c; --warn:#e3b341; } }
+  :root { --bg:#f6f7f9; --fg:#1b1f24; --muted:#5d6672; --card:#fff; --line:#d9dde3; --accent:#1c6ed5; --bad:#b3261e; --ok:#1d7a3a; --warn:#9a6700; --track:#e6e9ee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12161b; --fg:#e6e9ee; --muted:#9aa4b1; --card:#1a2028; --line:#2c343e; --accent:#6aa8ff; --bad:#ff8a80; --ok:#6fd68c; --warn:#e3b341; --track:#2a323c; } }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; -webkit-text-size-adjust:100%; }
   main { max-width:1100px; margin:0 auto; padding:16px; }
-  h1 { font-size:20px; margin:0 0 12px; } h2 { font-size:16px; margin:0 0 8px; }
+  h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:16px; margin:0 0 10px; }
   section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:14px; }
-  .cards { display:flex; flex-wrap:wrap; gap:8px; } .card { border:1px solid var(--line); border-radius:6px; padding:6px 12px; min-width:92px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:8px; margin-bottom:8px; }
+  .card { border:1px solid var(--line); border-radius:6px; padding:6px 12px; }
   .card b { display:block; font-size:20px; } .muted { color:var(--muted); font-size:13px; }
-  table { width:100%; border-collapse:collapse; font-size:13px; } th,td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:top; word-break:break-all; }
-  button, select, input { font:inherit; color:inherit; background:var(--card); border:1px solid var(--line); border-radius:6px; padding:4px 10px; }
+  p { margin:6px 0; }
+  button, select, input { font:inherit; color:inherit; background:var(--card); border:1px solid var(--line); border-radius:6px; padding:6px 12px; min-height:36px; }
   button { cursor:pointer; } button:hover { border-color:var(--accent); }
-  input[type=search] { width:min(420px, 100%); }
+  input[type=search] { flex:1 1 220px; min-width:0; }
   .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
   .bad { color:var(--bad); } .ok { color:var(--ok); } .warn { color:var(--warn); }
+
+  /* one entry per file, readable at any width: the name wraps, the folder sits under it, nothing is squeezed into columns */
+  .list { display:flex; flex-direction:column; gap:8px; }
+  .job { border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .job.queued { padding:8px 12px; }
+  .name { font-weight:600; overflow-wrap:anywhere; }
+  .dir { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+  .meta { display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:4px; font-size:13px; color:var(--muted); }
+  .chip { display:inline-block; border:1px solid var(--line); border-radius:10px; padding:0 8px; font-size:12px; color:var(--muted); }
+  .chip.demand { border-color:var(--accent); color:var(--accent); }
+  .err { margin-top:4px; overflow-wrap:anywhere; font-size:13px; }
+  .job .row { margin:8px 0 0; }
+
+  /* progress */
+  .track { height:10px; background:var(--track); border-radius:5px; overflow:hidden; margin-top:8px; }
+  .fill { height:100%; background:var(--accent); border-radius:5px; transition:width .6s ease; }
+  .fill.wait { width:35%; opacity:.5; animation:slide 1.4s ease-in-out infinite alternate; }
+  @keyframes slide { from { margin-left:0; } to { margin-left:65%; } }
+  @media (prefers-reduced-motion: reduce) { .fill.wait { animation:none; } .fill { transition:none; } }
+  .ptext { display:flex; flex-wrap:wrap; justify-content:space-between; gap:2px 12px; margin-top:4px; font-size:13px; }
+
+  .scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--line); vertical-align:top; white-space:nowrap; }
   .bar { display:flex; height:34px; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin:8px 0; }
   .seg { display:flex; align-items:center; justify-content:center; font-size:12px; color:#fff; min-width:2px; overflow:hidden; white-space:nowrap; }
   .ramp { background:repeating-linear-gradient(45deg, #888, #888 4px, #bbb 4px, #bbb 8px); color:#000; }
   svg { width:100%; height:auto; background:var(--card); border:1px solid var(--line); border-radius:6px; }
-  .legend { font-size:12px; color:var(--muted); }
+  #dtitle { overflow-wrap:anywhere; }
   #note { min-height:1.4em; }
+
+  @media (max-width: 640px) {
+    main { padding:10px; }
+    section { padding:10px 12px; }
+    .cards { grid-template-columns:repeat(3, 1fr); }
+    button, select, input { min-height:44px; }
+    .row > button { flex:1 1 auto; }
+    #workers { width:5em; }
+  }
 </style>
 </head>
 <body>
@@ -44,18 +78,26 @@
     <div class="row">
       <label>Files analysed at once <input type="number" id="workers" min="1" max="16" style="width:4.5em"></label>
       <button id="setworkers">Apply</button><button id="resetworkers" title="Forget the saved count and use the CONCURRENCY setting from the container template">Use template setting</button>
-      <span class="muted" id="workershint">Raising it starts more now; lowering it lets running files finish and takes no new ones. Saved across restarts.</span>
     </div>
+    <p class="muted" id="workershint">Raising it starts more now; lowering it lets running files finish and takes no new ones. Saved across restarts.</p>
   </section>
 
   <section>
-    <h2>Queue</h2>
-    <table id="queue"><thead><tr><th>State</th><th>Title or file</th><th>Priority</th><th>Since</th></tr></thead><tbody></tbody></table>
+    <h2>Running</h2>
+    <div class="list" id="running"></div>
+    <p class="muted" id="runningnone" hidden>Nothing is running.</p>
+  </section>
+
+  <section>
+    <h2>Up next</h2>
+    <div class="list" id="queue"></div>
+    <p class="muted" id="more"></p>
   </section>
 
   <section>
     <h2>Errors</h2>
-    <table id="errors"><thead><tr><th>File</th><th>Error</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="list" id="errors"></div>
+    <p class="muted" id="noerrors">None.</p>
   </section>
 
   <section>
@@ -64,7 +106,7 @@
       <input type="search" id="q" placeholder="Search title or path">
       <button id="go">Search</button><button id="vars">Variable-ratio titles</button>
     </div>
-    <table id="results"><thead><tr><th>Title or file</th><th>State</th><th>Segments</th><th>Flags</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="list" id="results"></div>
   </section>
 
   <section id="detail" hidden>
@@ -75,7 +117,7 @@
       <button id="ovsave">Save</button><span class="muted" id="ovnow"></span>
     </div>
     <div class="bar" id="bar"></div>
-    <table id="segs"><thead><tr><th>From</th><th>To</th><th>Ratio</th><th>Picture (x y w h)</th><th>Enter</th></tr></thead><tbody></tbody></table>
+    <div class="scroll"><table id="segs"><thead><tr><th>From</th><th>To</th><th>Ratio</th><th>Picture (x y w h)</th><th>Enter</th></tr></thead><tbody></tbody></table></div>
     <div id="ramps"></div>
   </section>
 </main>
@@ -87,7 +129,7 @@ let current = null;
 function el(tag, props, ...kids) {
   const e = document.createElement(tag);
   Object.assign(e, props || {});
-  for (const k of kids) e.append(k);
+  for (const k of kids) if (k != null) e.append(k);
   return e;
 }
 function key() { try { return localStorage.getItem("cihKey") || ""; } catch (e) { return ""; } }
@@ -111,13 +153,54 @@ async function json(path, opts) {
   if (!r.ok && r.status !== 404) throw new Error(path + " answered " + r.status);
   return r.status === 404 ? null : r.json();
 }
-const when = (t) => t ? new Date(t * 1000).toLocaleString() : "";
-const name = (r) => r.title || r.path;
+const when = (t) => t ? new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+const PRIORITY = ["on demand", "recent", "backlog"];
+
+// "/media/movies/Dunkirk (2017)/Dunkirk (2017) 4k HDR.mkv" -> name "Dunkirk (2017) 4k HDR", folder "movies / Dunkirk (2017)"
+function labels(r) {
+  const parts = r.path.replace(/^\/media\//, "").split("/");
+  const file = parts.pop() || r.path;
+  return { name: r.title || file.replace(/\.[^.]+$/, ""), dir: parts.join(" / ") };
+}
+function nameBlock(r) {
+  const l = labels(r);
+  return el("div", {}, el("div", { className: "name", textContent: l.name }), l.dir ? el("div", { className: "dir", textContent: l.dir }) : null);
+}
+function span(text, cls) { return el("span", { textContent: text, className: cls || "" }); }
+
+const minutes = (s) => s < 90 ? Math.max(1, Math.round(s)) + " s" : s < 5400 ? Math.round(s / 60) + " min" : (s / 3600).toFixed(1) + " h";
+function progressBlock(r) {
+  const p = r.progress, elapsed = r.started_at ? Date.now() / 1000 - r.started_at : 0;
+  const track = el("div", { className: "track" });
+  if (!p) {
+    track.append(el("div", { className: "fill wait" }));
+    return el("div", {}, track, el("div", { className: "ptext muted" }, span("Starting"), span(elapsed > 0 ? minutes(elapsed) + " so far" : "")));
+  }
+  const pct = Math.min(99, Math.round(p.fraction * 100));
+  track.append(el("div", { className: "fill", style: "width:" + pct + "%" }));
+  const left = p.fraction >= 0.03 && elapsed > 60 ? " · about " + minutes(elapsed * (1 - p.fraction) / p.fraction) + " left" : "";
+  return el("div", {}, track, el("div", { className: "ptext muted" },
+    span((p.phase === "reading" ? "Reading the file" : "Checking changes") + " · " + pct + "%"),
+    span(minutes(elapsed) + " so far" + left)));
+}
+
+function runningCard(r) {
+  return el("div", { className: "job" }, nameBlock(r),
+    el("div", { className: "meta" }, r.priority === 0 ? el("span", { className: "chip demand", textContent: "on demand" }) : null,
+      r.size ? span((r.size / 2 ** 30).toFixed(1) + " GiB") : null),
+    progressBlock(r));
+}
+function queuedCard(r) {
+  return el("div", { className: "job queued" }, nameBlock(r),
+    el("div", { className: "meta" }, el("span", { className: "chip" + (r.priority === 0 ? " demand" : ""), textContent: PRIORITY[r.priority] }), span("queued " + when(r.queued_at))));
+}
+
+function fill(list, cards) { list.textContent = ""; for (const c of cards) list.append(c); }
 
 async function refresh() {
   try {
     const s = await json("/api/v1/status");
-    $("ver").textContent = "v" + s.version + " · uptime " + Math.round(s.uptime_s / 60) + " min";
+    $("ver").textContent = "v" + s.version + " · up " + minutes(s.uptime_s);
     const c = $("cards"); c.textContent = "";
     for (const st of ["queued", "running", "done", "error", "skipped", "missing"]) {
       c.append(el("div", { className: "card" }, el("b", { textContent: String(s.counts[st] || 0), className: st === "error" && s.counts[st] ? "bad" : "" }), st));
@@ -132,15 +215,21 @@ async function refresh() {
       (sc.busy > sc.workers ? " (" + (sc.busy - sc.workers) + " finishing, then stopping)" : "") + ". " +
       (sc.last_scan ? "Last scan " + when(sc.last_scan.at) + " (" + sc.last_scan.seen + " files). " : "") +
       (s.plex.enabled ? (sc.last_plex ? (sc.last_plex.error ? "Plex: " + sc.last_plex.error : "Plex synced " + when(sc.last_plex.at) + " (" + sc.last_plex.matched + " matched).") : "Plex not synced yet.") : "Plex not configured.");
-    const q = await json("/api/v1/queue?limit=30");
-    const qb = $("queue").tBodies[0]; qb.textContent = "";
-    for (const r of q) qb.append(el("tr", {}, el("td", { textContent: r.status }), el("td", { textContent: name(r) }), el("td", { textContent: ["on demand", "recent", "backlog"][r.priority] }), el("td", { textContent: when(r.started_at || r.queued_at) })));
-    const e = await json("/api/v1/errors?limit=30");
-    const eb = $("errors").tBodies[0]; eb.textContent = "";
-    for (const r of e) {
+
+    const q = await json("/api/v1/queue?limit=" + Math.min(200, sc.workers * 2 + 20)) || [];
+    const running = q.filter((r) => r.status === "running"), queued = q.filter((r) => r.status !== "running").slice(0, 12);
+    fill($("running"), running.map(runningCard));
+    $("runningnone").hidden = running.length > 0;
+    fill($("queue"), queued.map(queuedCard));
+    const rest = (s.counts.queued || 0) - queued.length;
+    $("more").textContent = rest > 0 ? "and " + rest.toLocaleString() + " more queued" : "";
+
+    const e = await json("/api/v1/errors?limit=30") || [];
+    $("noerrors").hidden = e.length > 0;
+    fill($("errors"), e.map((r) => {
       const b = el("button", { textContent: "Retry" }); b.onclick = () => analyze(r.path);
-      eb.append(el("tr", {}, el("td", { textContent: name(r) }), el("td", { textContent: r.error || "", className: "bad" }), el("td", {}, b)));
-    }
+      return el("div", { className: "job" }, nameBlock(r), el("div", { className: "err bad", textContent: r.error || "" }), el("div", { className: "row" }, b));
+    }));
     note("");
   } catch (err) { note(err.message, "bad"); }
 }
@@ -152,11 +241,14 @@ async function analyze(path) {
 }
 
 function renderResults(rows) {
-  const b = $("results").tBodies[0]; b.textContent = "";
-  for (const r of rows) {
-    const open = el("button", { textContent: "Open" }); open.onclick = () => openTitle(r.path);
-    b.append(el("tr", {}, el("td", { textContent: name(r) }), el("td", { textContent: r.status + (r.skip_reason ? " (" + r.skip_reason + ")" : "") }), el("td", { textContent: r.segments == null ? "" : String(r.segments) }), el("td", { textContent: (r.flags || "").split(",").join(" ") }), el("td", {}, open)));
-  }
+  fill($("results"), rows.map((r) => {
+    const open = el("button", { textContent: "Open" }); open.onclick = () => { openTitle(r.path); $("detail").scrollIntoView({ behavior: "smooth" }); };
+    const flags = (r.flags || "").split(",").filter(Boolean).join(" · ");
+    return el("div", { className: "job" }, nameBlock(r),
+      el("div", { className: "meta" }, span(r.status + (r.skip_reason ? " (" + r.skip_reason + ")" : "")),
+        r.segments == null ? null : span(r.segments + (r.segments === 1 ? " segment" : " segments")), flags ? span(flags) : null),
+      el("div", { className: "row" }, open));
+  }));
 }
 async function search() { renderResults(await json("/api/v1/files?q=" + encodeURIComponent($("q").value)) || []); }
 
@@ -236,4 +328,3 @@ refresh(); setInterval(refresh, 5000);
 </script>
 </body>
 </html>
-

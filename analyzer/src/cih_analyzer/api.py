@@ -205,7 +205,11 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
 
     @app.get("/api/v1/queue", dependencies=secured)
     def queue(limit: int = Query(100, ge=1, le=LIST_LIMIT)) -> list[dict[str, Any]]:
-        return [_brief(r) for r in store.queue(limit)]
+        rows = [_brief(r) for r in store.queue(limit)]
+        for row in rows:
+            if row["status"] == "running":
+                row["progress"] = scheduler.progress_of(row["path"])
+        return rows
 
     @app.get("/api/v1/errors", dependencies=secured)
     def errors(limit: int = Query(100, ge=1, le=LIST_LIMIT)) -> list[dict[str, Any]]:

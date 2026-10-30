@@ -14,9 +14,13 @@ about 0.063; anything below that detects nothing (the whole frame counts as pict
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
+import tempfile
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -143,34 +147,67 @@ def coarse_scan(
     min_interval_s: float = MIN_SAMPLE_INTERVAL_S,
     threads: int | None = None,
     timeout: float = SCAN_TIMEOUT_S,
+    progress: Callable[[float], None] | None = None,
 ) -> list[Sample]:
-    """Decode the keyframes of `path` and measure each. Raises ProbeError if ffmpeg fails or times out."""
+    """Decode the keyframes of `path` and measure each. Raises ProbeError if ffmpeg fails or times out.
+
+    `progress`, if given, is called about once a second with the share of the file's duration ffmpeg has reached."""
     exe = shutil.which("ffmpeg")
     if exe is None:
         raise ProbeError("ffmpeg not found on PATH")
-    cmd = [exe, "-nostdin", "-hide_banner", "-loglevel", "error", "-skip_frame", "nokey"]
-    if threads:
-        cmd += ["-threads", str(threads)]
-    cmd += [
-        "-i", str(path),
-        "-map", f"0:{info.stream_index}",
-        "-an", "-sn", "-dn",
-        "-vf", build_filter(info, limit if limit is not None else limit_for(info), scale_width, min_interval_s),
-        "-f", "null", "-",
-    ]  # fmt: skip
-    try:
-        proc = subprocess.run(  # noqa: S603 - fixed executable, no shell
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise ProbeError(f"ffmpeg timed out after {timeout:.0f} s") from exc
+    with tempfile.TemporaryDirectory(prefix="cih-coarse-") as scratch:
+        progress_file = Path(scratch, "progress.txt")
+        cmd = [exe, "-nostdin", "-hide_banner", "-loglevel", "error", "-skip_frame", "nokey"]
+        if progress:
+            cmd += ["-nostats", "-progress", progress_file.as_posix()]
+        if threads:
+            cmd += ["-threads", str(threads)]
+        cmd += [
+            "-i", str(path),
+            "-map", f"0:{info.stream_index}",
+            "-an", "-sn", "-dn",
+            "-vf", build_filter(info, limit if limit is not None else limit_for(info), scale_width, min_interval_s),
+            "-f", "null", "-",
+        ]  # fmt: skip
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            proc = subprocess.Popen(cmd, stdout=out, stderr=err)  # noqa: S603 - fixed executable, no shell
+            deadline = time.monotonic() + timeout
+            try:
+                while True:
+                    try:
+                        proc.wait(timeout=1.0)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic() > deadline:
+                            raise ProbeError(f"ffmpeg timed out after {timeout:.0f} s") from None
+                        if progress and info.duration > 0:
+                            reached = _reached(progress_file)
+                            if reached is not None:
+                                progress(min(1.0, max(0.0, reached / info.duration)))
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+            out.seek(0)
+            err.seek(0)
+            stdout = out.read().decode("utf-8", errors="replace").replace("\r\n", "\n")
+            stderr = err.read().decode("utf-8", errors="replace").strip()
     if proc.returncode != 0:
-        tail = proc.stderr.strip().splitlines()
+        tail = stderr.splitlines()
         raise ProbeError(tail[-1] if tail else f"ffmpeg exit {proc.returncode}")
-    return parse_metadata(proc.stdout, info, scale_width)
+    if progress:
+        progress(1.0)
+    return parse_metadata(stdout, info, scale_width)
+
+
+def _reached(progress_file: Path) -> float | None:
+    """Seconds of the file ffmpeg says it has processed, from the end of its `-progress` file."""
+    try:
+        with open(progress_file, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - 2048))
+            tail = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    found = re.findall(r"^out_time_us=(-?\d+)$", tail, flags=re.MULTILINE)
+    return int(found[-1]) / 1e6 if found and int(found[-1]) >= 0 else None
