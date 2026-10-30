@@ -255,7 +255,7 @@ async function refresh() {
 }
 
 async function analyze(path) {
-  const r = await json("/api/v1/analyze", { method: "POST", body: { path } });
+  const r = await json("/api/v1/analyze", { method: "POST", body: { path, source: "manual" } });
   note("Analysis: " + (r ? r.status : "unknown"));
   refresh();
 }

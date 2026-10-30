@@ -157,16 +157,18 @@ def test_a_missing_timeline_is_a_404_and_analyze_queues_it_at_demand_priority(ap
     assert store.get(other_local)["priority"] == PRIORITY_PLAYER  # `analyze=1` is what a player sends
 
 
-def test_a_post_to_analyze_is_a_hand_request_unless_it_says_a_player_sent_it(api):
+def test_a_post_to_analyze_is_a_player_request_unless_it_says_it_was_made_by_hand(api):
     client, store, sched, root, local = api
     first, second = root / "First.mkv", root / "Second.mkv"
     first.write_bytes(b"1" * 5)
     second.write_bytes(b"2" * 5)
     sched.scan_now()
     a, b = (str(f).replace("\\", "/") for f in (first, second))
-    assert client.post("/api/v1/analyze", json={"path": a}).json()["status"] == "queued"
+    assert client.post("/api/v1/analyze", json={"path": a, "source": "manual"}).json()["status"] == "queued"
     assert store.get(a)["priority"] == PRIORITY_DEMAND
-    assert client.post("/api/v1/analyze", json={"path": b, "source": "player"}).json()["status"] == "queued"
+    assert (
+        client.post("/api/v1/analyze", json={"path": b}).json()["status"] == "queued"
+    )  # an older add-on sends no source
     assert store.get(b)["priority"] == PRIORITY_PLAYER
 
 

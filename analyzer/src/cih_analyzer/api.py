@@ -41,8 +41,8 @@ class Target(BaseModel):
 
 
 class AnalyzeBody(Target):
-    """`source: "player"` says a player is waiting for the title (it goes to an express worker); anything else is a
-    request made by hand and waits its turn like the rest of the queue."""
+    """`source: "manual"` marks a request made by hand (the status page, a script): it waits its turn like the rest of the
+    queue. Anything else, including no source, is a player that is waiting for the title and goes to an express worker."""
 
     source: str | None = None
 
@@ -157,7 +157,7 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
     @app.post("/api/v1/analyze", dependencies=secured)
     def analyze(target: AnalyzeBody) -> dict[str, Any]:
         row, local = resolve(target)
-        return {"path": local, "status": queue_for(row, local, player=target.source == "player")}
+        return {"path": local, "status": queue_for(row, local, player=target.source != "manual")}
 
     @app.get("/api/v1/override", dependencies=secured)
     def get_override(
