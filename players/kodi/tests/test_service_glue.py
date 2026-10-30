@@ -109,6 +109,7 @@ class FakeClient:
         self.lookups = list(lookups)
         self.calls = []
         self.requests = []  # (ident, at) of the explicit requests for analysis
+        self.last_error = "HTTP 503"
 
     def timeline(self, ident, request_analysis=True, at=None):
         self.calls.append((ident, request_analysis))
@@ -239,6 +240,22 @@ class GlueTests(unittest.TestCase):
         self.assertGreaterEqual(len(self.client.calls), 4)  # it kept asking until the final timeline came
         self.assertFalse(player.provisional)
 
+    def test_a_request_for_analysis_that_did_not_get_through_is_made_again(self):
+        # the analyzer was busy or unreachable for the first request: nothing was queued, so nothing would ever arrive
+        provisional = {"provisional": True, "coverage": [[0.0, 60.0]],
+                       "video": {"width": 3840, "height": 2160, "sar": "1:1", "fps": 24},
+                       "segments": [{"start": 0, "end": 60, "active": {"x": 0, "y": 269, "w": 3840, "h": 1622},
+                                     "boundary": {"kind": "cut", "frame": 0, "scene_cut": None}}], "ramps": []}  # fmt: skip
+        self.client = FakeClient(client_mod.Lookup("missing", None, False), client_mod.Lookup("provisional", provisional, True))
+        XBMC.Player.t0 = time.perf_counter()
+        player = self.new_player()
+        player.onAVStarted()
+        self.assertTrue(self.wait_for(lambda: self.client.requests))  # the poller asked again
+        self.assertTrue(self.wait_for(lambda: 1.0 in self.zooms()))  # and the survey's picture arrived
+        count = len(self.client.requests)
+        time.sleep(0.3)
+        self.assertEqual(len(self.client.requests), count)  # once the analyzer has the request it is not asked again
+        player.onPlayBackStopped()
     def test_a_seek_while_the_timeline_is_only_provisional_tells_the_analyzer_where_the_player_is(self):
         self.client = FakeClient(client_mod.Lookup("missing"))
         XBMC.Player.t0 = time.perf_counter()

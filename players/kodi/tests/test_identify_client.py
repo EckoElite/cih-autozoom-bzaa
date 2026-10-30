@@ -120,7 +120,16 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(found.status, "missing")
         self.assertEqual([r[0] for r in server.requests], ["GET", "POST"])
         self.assertEqual(json.loads(server.requests[1][3]), {"part_id": 7, "source": "player"})
+        self.assertTrue(found.asked)  # the lookup says whether the request was accepted
         self.assertTrue(server.requests[1][1].endswith("/api/v1/analyze"))
+
+    def test_a_request_that_fails_is_reported_so_that_it_can_be_made_again(self):
+        server = Server(http_error(404), urllib.error.URLError("timed out"))
+        found = self.make(server).timeline(PART)
+        self.assertEqual((found.status, found.asked), ("missing", False))
+        api = self.make(Server(http_error(503)))
+        self.assertFalse(api.request_analysis(PART, 5.0))
+        self.assertEqual(api.last_error, "HTTP 503")
 
     def test_polling_does_not_queue_again(self):
         server = Server(http_error(404))

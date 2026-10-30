@@ -26,6 +26,7 @@ class Lookup:
 
     status: str
     timeline: dict | None = None
+    asked: bool | None = None  # whether the analyzer accepted the request for analysis made with this lookup (None: none made)
 
     @property
     def override(self) -> dict | None:
@@ -40,9 +41,12 @@ class AnalyzerClient:
         self.cache_dir = cache_dir
         self.timeout = timeout
         self.opener = opener
+        self.last_error = ""  # why the last request for analysis failed, for the log
 
     # ---- requests ----------------------------------------------------------------------------------------------
-    def _request(self, method: str, route: str, query: dict | None = None, body: dict | None = None):
+    def _request(
+        self, method: str, route: str, query: dict | None = None, body: dict | None = None, timeout: float | None = None
+    ):
         url = self.base + route
         if query:
             url += "?" + urllib.parse.urlencode(query)
@@ -52,7 +56,7 @@ class AnalyzerClient:
             req.add_header("X-Api-Key", self.api_key)
         if data is not None:
             req.add_header("Content-Type", "application/json")
-        return self.opener(req, timeout=self.timeout)
+        return self.opener(req, timeout=timeout or self.timeout)
 
     @staticmethod
     def _query(ident: dict) -> dict:
@@ -72,12 +76,11 @@ class AnalyzerClient:
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 provisional = self._provisional_of(exc)
-                if request_analysis:
-                    self.request_analysis(ident, at)
+                asked = self.request_analysis(ident, at) if request_analysis else None
                 if provisional is not None:
-                    return Lookup("provisional", provisional)
+                    return Lookup("provisional", provisional, asked)
                 cached = self._read_cache(ident)  # an older timeline beats none while the new one is made
-                return Lookup("cached", cached) if cached else Lookup("missing")
+                return Lookup("cached", cached, asked) if cached else Lookup("missing", None, asked)
             return self._offline(ident)
         except (urllib.error.URLError, OSError, ValueError):
             return self._offline(ident)
@@ -104,10 +107,15 @@ class AnalyzerClient:
             body["source"] = "player"  # someone is waiting to watch it: the analyzer serves it ahead of the queue
             if at is not None:
                 body["at"] = round(float(at), 1)
-            with self._request("POST", "/api/v1/analyze", None, body):
+            # a busy analyzer (it scans the library at start-up) can take a while: longer than a lookup is given
+            with self._request("POST", "/api/v1/analyze", None, body, timeout=4 * self.timeout):
+                self.last_error = ""
                 return True
-        except (urllib.error.URLError, OSError, ValueError):
-            return False
+        except urllib.error.HTTPError as exc:
+            self.last_error = "HTTP %d" % exc.code
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            self.last_error = type(exc).__name__
+        return False
 
     def set_override(self, ident: dict, mode: str, preset: float | None = None) -> bool:
         """`mode`: "preset" (with a ratio), "disable" or "clear". Persisted by the analyzer, per title."""

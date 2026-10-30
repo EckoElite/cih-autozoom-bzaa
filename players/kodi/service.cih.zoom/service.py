@@ -82,6 +82,7 @@ class ZoomPlayer(xbmc.Player):
         self.stop_flag = threading.Event()
         self.poll_stop = threading.Event()
         self.nudge = threading.Event()  # the player moved: tell the analyzer where it is now
+        self.asked = None  # whether the analyzer has accepted our request for analysis of this title
         self.provisional = False  # the plan comes from a survey that is still running
         self.coverage = ()
         self.logfile = None
@@ -154,11 +155,22 @@ class ZoomPlayer(xbmc.Player):
             playing = ""
         # the played URL (it carries the Plex part id) and the library item's own path are both asked about
         self.ident = identify.identify_all(xbmc.getInfoLabel("Player.Filenameandpath"), playing)
-        self.lookup = make_client().timeline(
-            self.ident, ADDON.getSettingBool("request_analysis"), at=self.player_time()
-        )
+        client = make_client()
+        self.lookup = client.timeline(self.ident, ADDON.getSettingBool("request_analysis"), at=self.player_time())
+        self.asked = self.lookup.asked
+        if self.asked is False:
+            log("the analyzer did not take the request for analysis (%s); will try again" % client.last_error, xbmc.LOGWARNING)
         self.refresh_plan()
-        log("title %s, analyzer %s%s" % (self.ident["kind"], self.lookup.status, ", plan ready" if self.plan else ""))
+        log(
+            "title %s at %.0f s, analyzer %s%s%s"
+            % (
+                self.ident["kind"],
+                self.player_time(),
+                self.lookup.status,
+                {True: ", asked for it", False: ", request failed"}.get(self.asked, ""),
+                ", plan ready" if self.plan else "",
+            )
+        )
 
     def player_time(self):
         """Where the player is, in seconds (0 while it cannot say)."""
@@ -215,7 +227,7 @@ class ZoomPlayer(xbmc.Player):
 
     def end(self):
         self.halt()
-        self.ident = self.lookup = self.plan = None
+        self.ident = self.lookup = self.plan = self.asked = None
         set_zoom(1.0)
         if self.logfile:
             self.logfile.close()
@@ -261,8 +273,11 @@ class ZoomPlayer(xbmc.Player):
                 return
             try:
                 client = make_client()
-                if moved:  # a seek: the survey should work where the player is now
-                    client.request_analysis(self.ident, self.player_time())
+                if (moved or self.asked is False) and ADDON.getSettingBool("request_analysis"):
+                    # a seek (the survey should work where the player is now), or the first request did not get through
+                    self.asked = client.request_analysis(self.ident, self.player_time())
+                    if not self.asked:
+                        log("request for analysis failed (%s)" % client.last_error, xbmc.LOGWARNING)
                 lookup = client.timeline(self.ident, False)
             except Exception as exc:  # noqa: BLE001 - never let a lookup end the thread
                 log("poll failed: %r" % (exc,), xbmc.LOGWARNING)
@@ -278,6 +293,7 @@ class ZoomPlayer(xbmc.Player):
             if not self.plan:
                 continue
             self.emit({"kind": "timeline", "provisional": provisional, "coverage": [list(c) for c in coverage]})
+            log("%s timeline, %d stretch(es) covered" % ("provisional" if provisional else "final", len(coverage)))
             if not provisional:
                 self.poller = None
             self.begin()  # carry on from the current position with the new plan
