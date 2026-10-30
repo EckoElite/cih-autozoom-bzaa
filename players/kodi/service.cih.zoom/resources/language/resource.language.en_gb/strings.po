@@ -26,3 +26,95 @@ msgstr ""
 msgctxt "#30005"
 msgid "How long before each picture change the zoom command is sent, to cancel Kodi's delay in applying it. Measured default 316 ms."
 msgstr ""
+
+msgctxt "#30010"
+msgid "Timing bias at a cut"
+msgstr ""
+
+msgctxt "#30011"
+msgid "Where a cut's remaining error goes. Keep the picture inside the screen (any error shows as a frame of thin bars), keep the bars away (any error shows as a frame of picture past the screen edge), or no bias."
+msgstr ""
+
+msgctxt "#30012"
+msgid "No spill (default)"
+msgstr ""
+
+msgctxt "#30013"
+msgid "No bars"
+msgstr ""
+
+msgctxt "#30014"
+msgid "Centered"
+msgstr ""
+
+msgctxt "#30020"
+msgid "Analyzer URL"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Address of the analyzer on the network, for example http://10.0.0.5:8765"
+msgstr ""
+
+msgctxt "#30022"
+msgid "Analyzer API key"
+msgstr ""
+
+msgctxt "#30023"
+msgid "The analyzer's API key, if it has one."
+msgstr ""
+
+msgctxt "#30024"
+msgid "Ask for analysis of unknown titles"
+msgstr ""
+
+msgctxt "#30025"
+msgid "When a title has no timeline yet, ask the analyzer to do it first. Until it arrives the whole frame is contained in the screen."
+msgstr ""
+
+msgctxt "#30026"
+msgid "Recheck interval (s)"
+msgstr ""
+
+msgctxt "#30027"
+msgid "How often to ask the analyzer again while a title has no timeline."
+msgstr ""
+
+msgctxt "#30030"
+msgid "Timing"
+msgstr ""
+
+msgctxt "#30031"
+msgid "When the zoom changes"
+msgstr ""
+
+msgctxt "#30040"
+msgid "Screen"
+msgstr ""
+
+msgctxt "#30041"
+msgid "The part of the picture on the screen"
+msgstr ""
+
+msgctxt "#30042"
+msgid "Top row of the screen band"
+msgstr ""
+
+msgctxt "#30043"
+msgid "First row of the 3840x2160 output that lands on the screen. Measured on the wall in Phase 1; the design value is 263."
+msgstr ""
+
+msgctxt "#30044"
+msgid "Bottom row of the screen band"
+msgstr ""
+
+msgctxt "#30045"
+msgid "First row below the screen (exclusive). The design value is 1897."
+msgstr ""
+
+msgctxt "#30046"
+msgid "Fill the screen height with wider pictures"
+msgstr ""
+
+msgctxt "#30047"
+msgid "For a picture wider than the screen (2.39 or 2.40), fill the band's height and crop a sliver off the sides, instead of fitting it with thin bars."
+msgstr ""

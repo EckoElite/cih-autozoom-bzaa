@@ -8,6 +8,42 @@
           <default>true</default>
           <control type="toggle"/>
         </setting>
+        <setting id="analyzer_url" type="string" label="30020" help="30021">
+          <level>0</level>
+          <default></default>
+          <control type="edit" format="string">
+            <heading>30020</heading>
+          </control>
+        </setting>
+        <setting id="api_key" type="string" label="30022" help="30023">
+          <level>0</level>
+          <default></default>
+          <control type="edit" format="string">
+            <heading>30022</heading>
+            <hidden>true</hidden>
+          </control>
+        </setting>
+        <setting id="request_analysis" type="boolean" label="30024" help="30025">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="poll_s" type="integer" label="30026" help="30027">
+          <level>1</level>
+          <default>20</default>
+          <constraints>
+            <minimum>5</minimum>
+            <step>5</step>
+            <maximum>300</maximum>
+          </constraints>
+          <control type="edit" format="integer">
+            <heading>30026</heading>
+          </control>
+        </setting>
+      </group>
+    </category>
+    <category id="timing" label="30030">
+      <group id="1" label="30031">
         <setting id="lead_ms" type="integer" label="30004" help="30005">
           <level>0</level>
           <default>316</default>
@@ -19,6 +55,53 @@
           <control type="edit" format="integer">
             <heading>30004</heading>
           </control>
+        </setting>
+        <setting id="edge_bias" type="string" label="30010" help="30011">
+          <level>0</level>
+          <default>no_spill</default>
+          <constraints>
+            <options>
+              <option label="30012">no_spill</option>
+              <option label="30013">no_bars</option>
+              <option label="30014">centered</option>
+            </options>
+          </constraints>
+          <control type="list" format="string">
+            <heading>30010</heading>
+          </control>
+        </setting>
+      </group>
+    </category>
+    <category id="screen" label="30040">
+      <group id="1" label="30041">
+        <setting id="band_top" type="integer" label="30042" help="30043">
+          <level>1</level>
+          <default>263</default>
+          <constraints>
+            <minimum>0</minimum>
+            <step>1</step>
+            <maximum>1080</maximum>
+          </constraints>
+          <control type="edit" format="integer">
+            <heading>30042</heading>
+          </control>
+        </setting>
+        <setting id="band_bottom" type="integer" label="30044" help="30045">
+          <level>1</level>
+          <default>1897</default>
+          <constraints>
+            <minimum>1080</minimum>
+            <step>1</step>
+            <maximum>2160</maximum>
+          </constraints>
+          <control type="edit" format="integer">
+            <heading>30044</heading>
+          </control>
+        </setting>
+        <setting id="scope_fill" type="boolean" label="30046" help="30047">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle"/>
         </setting>
       </group>
     </category>

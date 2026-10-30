@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example only: not installed by the add-on. Copy to userdata/keymaps/ on the Shield to bind a remote button to the
+  per-title override (automatic -> off -> 1.33 -> 1.78 -> 1.85 -> 2.00 -> 2.35 -> 2.39 -> automatic).
+  Replace <red> with the key the chosen remote button sends (to find it: Kodi log with debug on, press the button).
+-->
+<keymap>
+  <FullscreenVideo>
+    <keyboard>
+      <red>RunScript(service.cih.zoom)</red>
+    </keyboard>
+  </FullscreenVideo>
+</keymap>

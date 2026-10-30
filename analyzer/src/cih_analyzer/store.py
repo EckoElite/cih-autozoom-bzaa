@@ -311,6 +311,9 @@ class Store:
             > 0
         )
 
+    def all_paths(self) -> list[str]:
+        return [r["path"] for r in self._all("SELECT path FROM files")]
+
     def boost_recent(self, added_since: float) -> int:
         """Queued files Plex added since `added_since` jump ahead of the backlog."""
         return self._run(

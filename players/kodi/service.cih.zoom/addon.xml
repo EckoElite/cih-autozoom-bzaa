@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="service.cih.zoom" name="CIH Auto-Zoom" version="0.1.0" provider-name="cih-autozoom">
+<addon id="service.cih.zoom" name="CIH Auto-Zoom" version="0.2.0" provider-name="cih-autozoom">
   <requires>
     <import addon="xbmc.python" version="3.0.1"/>
   </requires>
   <extension point="xbmc.service" library="service.py"/>
+  <extension point="xbmc.python.script" library="override.py"/>
   <extension point="xbmc.addon.metadata">
     <platform>all</platform>
     <summary lang="en_GB">Constant Image Height zoom for variable aspect ratio video</summary>
-    <description lang="en_GB">Applies a per-title zoom timeline during playback so the picture stays inside a 2.35:1 screen. Prototype build: reads test timelines only.</description>
+    <description lang="en_GB">Applies a per-title zoom timeline during playback so the picture stays inside a 2.35:1 screen. Timelines come from the CIH analyzer; a title it has not analyzed yet is contained in the screen until its timeline arrives.</description>
     <license>GPL-3.0-or-later</license>
   </extension>
 </addon>

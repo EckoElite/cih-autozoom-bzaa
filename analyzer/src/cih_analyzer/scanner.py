@@ -88,11 +88,42 @@ def scan_media(
     return summary
 
 
+MAX_NAME_PARTS = 4  # folder names a Plex path and a container path may be compared by, at most
+
+
+class NameIndex:
+    """Container paths by their last few components, to find the file Plex means when no PATH_MAP rule says where Plex
+    keeps it (`/movies/Buddy (2026)/Buddy (2026).mkv` against `/media/movies/Buddy (2026)/Buddy (2026).mkv`). A Plex
+    path matches the file whose path ends the same way, using as few components as make it unambiguous; if two files
+    end alike at every depth tried, nothing matches (a wrong match is worse than none). Case counts, as on Unraid."""
+
+    def __init__(self, paths: list[str]):
+        self.by_depth: list[dict[tuple[str, ...], list[str]]] = [{} for _ in range(MAX_NAME_PARTS + 1)]
+        for path in paths:
+            parts = tuple(p for p in path.replace("\\", "/").split("/") if p)
+            for n in range(2, MAX_NAME_PARTS + 1):
+                if len(parts) >= n:
+                    self.by_depth[n].setdefault(parts[-n:], []).append(path)
+
+    def find(self, plex_path: str) -> str | None:
+        parts = tuple(p for p in plex_path.replace("\\", "/").split("/") if p)
+        for n in range(2, min(MAX_NAME_PARTS, len(parts)) + 1):
+            found = self.by_depth[n].get(parts[-n:], [])
+            if len(found) == 1:
+                return found[0]
+            if not found:
+                return None  # nothing ends like this at depth n, so nothing will at a greater depth
+        return None
+
+
 @dataclass
 class PlexSummary:
     sections: int = 0
     parts: int = 0
     matched: int = 0
+    matched_by_name: int = (
+        0  # of `matched`, found by folder and file name because no PATH_MAP rule covered them
+    )
     unknown: int = (
         0  # Plex lists the file but the scanner has not seen it (not mounted, or outside the roots)
     )
@@ -115,6 +146,7 @@ def sync_plex(
     now = time.time() if now is None else now
     summary = PlexSummary()
     skip = {s.casefold() for s in skip_sections}
+    names: NameIndex | None = None
     for section in client.sections():
         if section.title.casefold() in skip:
             summary.skipped_sections.append(section.title)
@@ -133,6 +165,19 @@ def sync_plex(
                     title=part.title,
                     added_at=part.added_at,
                 )
+                if not ok:
+                    if names is None:
+                        names = NameIndex(store.all_paths())
+                    by_name = names.find(part.path)
+                    if by_name:
+                        ok = store.set_plex(
+                            by_name,
+                            part_id=part.part_id,
+                            rating_key=part.rating_key,
+                            title=part.title,
+                            added_at=part.added_at,
+                        )
+                        summary.matched_by_name += int(ok)
                 if ok:
                     summary.matched += 1
                 else:

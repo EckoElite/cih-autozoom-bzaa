@@ -16,15 +16,27 @@ import time
 from collections import deque
 
 FPS = {"23.976": (24000, 1001), "24": (24, 1)}
+STANDARD = ((24000, 1001), (24, 1), (25, 1), (30000, 1001), (30, 1), (48, 1), (50, 1), (60000, 1001), (60, 1))
+
+
+def fps_pair(fps):
+    """(numerator, denominator) of a frame rate given as a label ("23.976"), or a number snapped to a standard rate."""
+    if str(fps) in FPS:
+        return FPS[str(fps)]
+    value = float(fps)
+    num, den = min(STANDARD, key=lambda p: abs(p[0] / p[1] - value))
+    if abs(num / den - value) / value < 0.002:
+        return num, den
+    return int(round(value * 1001)), 1001
 
 
 def frame_time(frame, fps_label):
-    num, den = FPS[str(fps_label)]
+    num, den = fps_pair(fps_label)
     return frame * den / float(num)
 
 
 def frame_at(seconds, fps_label):
-    num, den = FPS[str(fps_label)]
+    num, den = fps_pair(fps_label)
     return int(seconds * num / den + 1e-9)
 
 
@@ -40,6 +52,8 @@ def set_points(timeline):
 
 
 def initial_zoom(timeline):
+    if "initial" in timeline:
+        return float(timeline["initial"])
     cuts = timeline.get("cuts") or []
     return float(cuts[0]["zoom_from"]) if cuts else 1.0
 

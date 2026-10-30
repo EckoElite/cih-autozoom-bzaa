@@ -10,6 +10,7 @@ on:
     paths-ignore: ["docs/**", "unraid/**", "**/*.md"]
   pull_request:
     paths-ignore: ["docs/**", "unraid/**", "**/*.md"]
+  # (a push that changes only players/** still runs everything, and republishes an identical image)
 
 permissions:
   contents: read
@@ -55,8 +56,18 @@ jobs:
           docker logs smoke
           docker rm -f smoke
 
+  addon:
+    # the Kodi add-on's pure-Python parts and its glue against stand-in Kodi modules (standard library only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s players/kodi/tests -v
+
   image:
-    needs: [lint, test]
+    needs: [lint, test, addon]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:

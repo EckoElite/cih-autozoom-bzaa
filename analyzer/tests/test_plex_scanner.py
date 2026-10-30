@@ -257,6 +257,29 @@ def test_symlinks_are_not_followed_out_of_the_root(tmp_path, media):
 # ---- Plex matching -------------------------------------------------------------------------------------------------
 
 
+def test_a_plex_path_no_rule_covers_is_found_by_its_folder_and_file_name(tmp_path, media, plex):
+    from cih_analyzer.scanner import NameIndex
+
+    store = Store(tmp_path / "s.sqlite")
+    base = str(media).replace("\\", "/")
+    scan_media([str(media)], store, "0.1.0")
+    items = [
+        movie(1, "Film", [(11, "/somewhere/else/Film (2020)/Film.mkv")]),  # not under any PATH_MAP rule
+        movie(2, "Not here", [(13, "/somewhere/else/Nowhere (2001)/x.mkv")]),
+    ]
+    plex.routes["/library/sections/1/all"] = lambda q: {"MediaContainer": {"totalSize": 2, "Metadata": items}}
+    summary = sync_plex(client(plex), store, PathMap(), skip_sections=("youtube",))
+    assert (summary.matched, summary.matched_by_name, summary.unknown) == (1, 1, 1)
+    assert store.find(part_id=11)["path"] == f"{base}/Film (2020)/Film.mkv"
+    # two files that end alike are never guessed between; a longer ending can tell them apart
+    index = NameIndex(["/media/movies/A (2000)/x.mkv", "/media/tv/A (2000)/x.mkv", "/media/tv/B/S1/e.mkv"])
+    assert index.find("/plex/A (2000)/x.mkv") is None
+    assert index.find("/plex/movies/A (2000)/x.mkv") == "/media/movies/A (2000)/x.mkv"
+    assert index.find("/plex/tv/A (2000)/x.mkv") == "/media/tv/A (2000)/x.mkv"
+    assert index.find("/plex/B/S1/e.mkv") == "/media/tv/B/S1/e.mkv"
+    assert index.find("/plex/b/s1/e.mkv") is None  # case counts
+
+
 def test_sync_attaches_plex_ids_to_scanned_files_and_boosts_recent_titles(tmp_path, media, plex):
     store = Store(tmp_path / "s.sqlite")
     base = str(media).replace("\\", "/")
