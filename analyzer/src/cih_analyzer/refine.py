@@ -716,7 +716,29 @@ def settle(
         if k is None:
             break
         i = k - 1 if k > 0 else 0
-        segs[i : i + 2] = [_merge_pair(segs[i], segs[i + 1], info)]
+        host = i if k > i else i + 1  # the neighbour a dropped segment goes into
+        if _short_shot_of_a_bigger_picture(segs[k], segs[host], info) and segs[k].verified is not False:
+            # under a second of a bigger picture inside a long one: widening the long one to match would leave all
+            # of it small, so the long one keeps its own picture and the short shot goes without its zoom change
+            first, last = sorted((segs[k], segs[host]), key=lambda s: s.start)
+            segs[i : i + 2] = [
+                replace(
+                    segs[host],
+                    start=first.start,
+                    end=last.end,
+                    flags=tuple(dict.fromkeys([*segs[host].flags, "short_shot_dropped"])),
+                )
+            ]
+        else:
+            segs[i : i + 2] = [_merge_pair(segs[i], segs[i + 1], info)]
         del bounds[i]
         merges += 1
     return segs, bounds, merges
+
+
+def _short_shot_of_a_bigger_picture(short: RefinedSegment, host: RefinedSegment, info: VideoInfo) -> bool:
+    """A segment under `MIN_SEGMENT_S` whose picture zooms noticeably less than its neighbour's (it is bigger) and
+    is much shorter than the neighbour."""
+    if short.end - short.start >= MIN_SEGMENT_S or host.end - host.start < 4 * MIN_SEGMENT_S:
+        return False
+    return _zoom(short.rect, info) < _zoom(host.rect, info) / (1 + EQUIVALENT_ZOOM)

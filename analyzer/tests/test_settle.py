@@ -240,6 +240,22 @@ def test_a_lone_small_picture_stays_because_there_is_nothing_to_fold_it_into():
     assert settle([only], [], INFO)[0] == [only]
 
 
+def test_a_sub_second_shot_of_a_bigger_picture_does_not_widen_the_long_scene_around_it():
+    # a 0.6 s full-frame IMAX shot inside a 60 s scope scene: the scene keeps its own picture
+    segments = [seg(0, 30, SCOPE), seg(30, 30.6, WIDE), seg(30.6, 90, SCOPE)]
+    out_segments, out_boundaries, _ = settle(segments, [cut(30.0), cut(30.6)], INFO)
+    assert [s.rect for s in out_segments] != [WIDE]
+    assert all(s.rect == SCOPE for s in out_segments)  # nothing was widened to 16:9
+    assert out_segments[0].start == 0 and out_segments[-1].end == 90
+    assert all(a.end == b.start for a, b in zip(out_segments, out_segments[1:], strict=False))
+
+
+def test_a_sub_second_shot_of_a_smaller_picture_is_still_folded_in_over_the_larger_rectangle():
+    segments = [seg(0, 30, WIDE), seg(30, 30.6, SCOPE), seg(30.6, 90, WIDE)]
+    out_segments, _, merges = settle(segments, [cut(30.0), cut(30.6)], INFO)
+    assert merges >= 1 and all(s.rect == WIDE for s in out_segments)
+
+
 def test_a_segment_under_a_second_is_folded_into_its_neighbour():
     segments = [seg(0, 20, WIDE), seg(20, 20.4, IMAX)]
     out_segments, out_boundaries, merges = settle(segments, [cut(20.0)], INFO)

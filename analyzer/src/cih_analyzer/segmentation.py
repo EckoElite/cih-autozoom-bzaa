@@ -38,6 +38,9 @@ MIN_RECT_TOLERANCE_PX = 8
 MIN_EXCURSION_STATES = 3
 VERIFY_CONFIDENCE = 0.9
 VERIFY_SHORT_SEGMENT_S = 15.0
+FULL_FRAME_SHARE = 0.98  # a picture this much of the frame in both directions fills it
+INSERT_MIN_YAVG = 40.0  # a sample must be at least this bright (0..255) to vouch for a full-frame insert
+INSERT_LARGER_BY = 0.9  # the pictures either side must cover at most this share of the insert's area
 
 
 @dataclass(frozen=True)
@@ -162,8 +165,32 @@ class _Run:
 class _Context:
     """Timing facts shared by the merge steps: the sampling interval and where the file starts and ends."""
 
-    def __init__(self, params: SegmentationParams, gap: float, min_samples: int, end: float):
+    def __init__(
+        self,
+        params: SegmentationParams,
+        gap: float,
+        min_samples: int,
+        end: float,
+        frame: tuple[int, int] = (0, 0),
+    ):
         self.params, self.gap, self.min_samples, self.end = params, gap, min_samples, end
+        self.frame = frame  # the container's width and height
+
+    def is_full_frame_insert(self, runs: list[_Run], i: int) -> bool:
+        """A short run whose picture fills the whole frame on bright samples, between smaller pictures: a real shot
+        of a bigger picture (a 16:9 IMAX shot among scope ones), not a flash or a misread. Dropping it as flicker
+        would leave that shot cropped, so it is kept for the refinement pass to check at full resolution."""
+        run = runs[i]
+        width, height = self.frame
+        if not (run.preset and width and height):
+            return False
+        x, y, w, h = run.rect
+        if w < FULL_FRAME_SHARE * width or h < FULL_FRAME_SHARE * height:
+            return False
+        if min(s.yavg for s, _ in run.samples) < INSERT_MIN_YAVG:
+            return False
+        beside = [runs[j] for j in (i - 1, i + 1) if 0 <= j < len(runs)]
+        return bool(beside) and all(r.rect[2] * r.rect[3] <= INSERT_LARGER_BY * w * h for r in beside)
 
     def durations(
         self, runs: list[_Run], starts_file: bool, ends_file: bool, stretch_end: float
@@ -304,7 +331,11 @@ def _merge_short(
 ) -> list[_Run]:
     while len(runs) > 1:
         durations = ctx.durations(runs, starts_file, ends_file, stretch_end)
-        shorts = [i for i, r in enumerate(runs) if ctx.is_short(r, durations[i])]
+        shorts = [
+            i
+            for i, r in enumerate(runs)
+            if ctx.is_short(r, durations[i]) and not ctx.is_full_frame_insert(runs, i)
+        ]
         if not shorts:
             break
         i = min(shorts, key=lambda k: (durations[k], k))
@@ -384,7 +415,7 @@ def segment_samples(
     all_gaps = [b.t - a.t for a, b in zip(ordered, ordered[1:], strict=False)]
     gap = statistics.median(all_gaps) if all_gaps else 1.0
     min_samples = params.min_samples if gap <= params.min_segment_s / 2 else 1
-    ctx = _Context(params, gap, min_samples, end)
+    ctx = _Context(params, gap, min_samples, end, (info.width, info.height))
 
     runs, chains = _extract_ramps(_build_runs(labelled, rect_tolerance(info)), ctx)
     runs_with_chains = _merge_with_ramps(runs, chains, ctx)

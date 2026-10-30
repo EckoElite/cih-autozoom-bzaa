@@ -75,6 +75,25 @@ def test_a_burned_in_subtitle_in_the_matte_is_flicker():
     assert result.segments[0].confidence < 1.0  # the two merged samples count against confidence
 
 
+def test_one_bright_full_frame_sample_inside_a_scope_scene_is_a_real_shot_not_flicker():
+    # a 16:9 IMAX shot of a second or two among scope ones: dropping it would leave that shot cropped
+    samples = run(0, 20, 2.39, step=1.6) + [sample(20.0, R_1_78, yavg=70.0)] + run(21.6, 40, 2.39, step=1.6)
+    result = segment_samples(samples, make_info(duration=40.0))
+    assert [s.aspect for s in result.segments] == [2.39, R_1_78, 2.39]
+    assert result.segments[1].needs_verification  # and the refinement pass still checks it at full resolution
+
+
+def test_a_dim_or_partial_larger_sample_is_still_flicker():
+    dim = run(0, 20, 2.39, step=1.6) + [sample(20.0, R_1_78, yavg=30.0)] + run(21.6, 40, 2.39, step=1.6)
+    assert [s.aspect for s in segment_samples(dim, make_info(duration=40.0)).segments] == [
+        2.39
+    ]  # too dark to vouch
+    partial = run(0, 20, 2.39, step=1.6) + [sample(20.0, 1.90, yavg=70.0)] + run(21.6, 40, 2.39, step=1.6)
+    assert [s.aspect for s in segment_samples(partial, make_info(duration=40.0)).segments] == [
+        2.39
+    ]  # not the full frame
+
+
 def test_a_studio_logo_at_16_9_before_a_scope_film_is_two_segments():
     result = segment_samples(run(0, 4, R_1_78) + run(4, 40, 2.39), make_info(duration=40.0))
     assert segs(result) == [(0.0, 3.0, R_1_78), (4.0, 40.0, 2.39)]
