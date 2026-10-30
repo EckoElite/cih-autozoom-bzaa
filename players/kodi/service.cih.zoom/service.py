@@ -327,7 +327,8 @@ class ZoomPlayer(xbmc.Player):
             set_zoom(now_zoom)
             self.emit({"kind": "start", "frame": frame, "zoom": now_zoom, "lead_s": lead,
                        "offset_s": clock.offset(), "override": self.plan.get("override")})  # fmt: skip
-            events = zoomcore.build_events(self.plan, lead, from_frame=frame + 1)
+            stride = max(1, ADDON.getSettingInt("ramp_stride"))
+            events = zoomcore.build_events(self.plan, lead, from_frame=frame + 1, ramp_stride=stride)
             num, den = zoomcore.fps_pair(self.plan["fps"])
             sent = zoomcore.run_events(events, clock, set_zoom, self.stop_flag.is_set,
                                        log=lambda r: self.emit(dict(r, kind="event")), frame_s=den / float(num))  # fmt: skip
@@ -338,18 +339,22 @@ class ZoomPlayer(xbmc.Player):
 
 
 def open_start_addon(monitor):
-    """Open the add-on named in the settings (PM4K) once Kodi has drawn its home screen, so opening Kodi opens PM4K.
+    """Open the add-on named in the settings (PM4K) once Kodi has drawn its first screen, so opening Kodi opens PM4K.
     Runs once per Kodi start, when this service starts; does nothing if something is already playing."""
+    import xbmcgui
+
     addon_id = ADDON.getSetting("start_addon").strip()
     if not addon_id or not ADDON.getSettingBool("open_at_start"):
         return
     waited = 0.0
-    while not xbmc.getCondVisibility("Window.IsActive(home)") and waited < 30 and not monitor.abortRequested():
-        monitor.waitForAbort(0.5)
-        waited += 0.5
+    # the start-up animation has window ids below 10000; the Home window and every other normal window are 10000 up,
+    # so this works whichever window Kodi is set to start in
+    while xbmcgui.getCurrentWindowId() < 10000 and waited < 30 and not monitor.abortRequested():
+        monitor.waitForAbort(0.25)
+        waited += 0.25
     if monitor.waitForAbort(0.3) or xbmc.getCondVisibility("Player.HasMedia"):  # a short settle; PM4K's own start-up is the rest
         return
-    log("opening %s (home screen after %.1f s)" % (addon_id, waited))
+    log("opening %s (first screen after %.1f s)" % (addon_id, waited))
     xbmc.executebuiltin("RunScript(%s)" % addon_id)  # RunAddon would open PM4K as a (failing) plugin folder
 
 

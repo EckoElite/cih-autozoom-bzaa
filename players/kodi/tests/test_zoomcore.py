@@ -66,6 +66,12 @@ class TimelineTests(unittest.TestCase):
         self.assertAlmostEqual(ev[0]["target"], 48 * FRAME_S - 0.316)
         self.assertTrue(all(a["target"] <= b["target"] for a, b in zip(ev, ev[1:])))
 
+    def test_a_ramp_step_asks_for_every_nth_frame_and_always_the_last(self):
+        ramp = {"fps": "24", "cuts": [], "ramps": [{"start_frame": 100, "zoom": [0.8 + 0.01 * i for i in range(11)]}]}
+        self.assertEqual([e["frame"] for e in zoomcore.build_events(ramp, 0.3)], list(range(100, 111)))
+        self.assertEqual([e["frame"] for e in zoomcore.build_events(ramp, 0.3, ramp_stride=4)], [100, 104, 108, 110])
+        self.assertEqual(zoomcore.zoom_at_frame(ramp, 103), 0.8 + 0.03)      # a seek into a ramp still gets the exact frame
+
     def test_build_events_from_frame(self):
         ev = zoomcore.build_events(TIMELINE, 0.3, from_frame=121)
         self.assertEqual([e["frame"] for e in ev][:2], [192, 300])

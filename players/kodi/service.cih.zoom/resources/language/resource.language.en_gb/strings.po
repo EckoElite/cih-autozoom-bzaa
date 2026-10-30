@@ -142,3 +142,11 @@ msgstr ""
 msgctxt "#30055"
 msgid "The add-on id, for example script.plexmod."
 msgstr ""
+
+msgctxt "#30056"
+msgid "Ramp update step (frames)"
+msgstr ""
+
+msgctxt "#30057"
+msgid "During a gradual picture change, send a zoom update every this many frames (1 = every frame). Kodi can drop picture frames when asked for a zoom change on every frame; a larger step asks less often."
+msgstr ""

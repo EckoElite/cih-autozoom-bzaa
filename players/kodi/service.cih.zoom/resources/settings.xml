@@ -72,6 +72,18 @@
             <heading>30004</heading>
           </control>
         </setting>
+        <setting id="ramp_stride" type="integer" label="30056" help="30057">
+          <level>0</level>
+          <default>1</default>
+          <constraints>
+            <minimum>1</minimum>
+            <step>1</step>
+            <maximum>12</maximum>
+          </constraints>
+          <control type="edit" format="integer">
+            <heading>30056</heading>
+          </control>
+        </setting>
         <setting id="edge_bias" type="string" label="30010" help="30011">
           <level>0</level>
           <default>no_spill</default>

@@ -40,14 +40,17 @@ def frame_at(seconds, fps_label):
     return int(seconds * num / den + 1e-9)
 
 
-def set_points(timeline):
-    """Sorted list of (frame, zoom). Later entries for the same frame win."""
+def set_points(timeline, stride=1):
+    """Sorted list of (frame, zoom). Later entries for the same frame win. With stride N a ramp keeps only every Nth
+    frame (and its last), so Kodi is asked for fewer geometry changes per second."""
     pts = {}
     for cut in timeline.get("cuts", []):
         pts[int(cut["frame"])] = float(cut["zoom_to"])
     for ramp in timeline.get("ramps", []):
+        last = len(ramp["zoom"]) - 1
         for i, z in enumerate(ramp["zoom"]):
-            pts[int(ramp["start_frame"]) + i] = float(z)
+            if stride <= 1 or i % stride == 0 or i == last:
+                pts[int(ramp["start_frame"]) + i] = float(z)
     return sorted(pts.items())
 
 
@@ -66,14 +69,14 @@ def zoom_at_frame(timeline, frame):
     return pts[i][1] if i >= 0 else initial_zoom(timeline)
 
 
-def build_events(timeline, lead_s, from_frame=0):
+def build_events(timeline, lead_s, from_frame=0, ramp_stride=1):
     """Events [{"target", "frame", "zoom"}] sorted by target time, for set points at or after from_frame.
 
     target is in seconds of player time: the frame's presentation time minus lead_s.
     """
     fps = timeline["fps"]
     return [{"target": frame_time(f, fps) - lead_s, "frame": f, "zoom": z}
-            for f, z in set_points(timeline) if f >= from_frame]
+            for f, z in set_points(timeline, ramp_stride) if f >= from_frame]
 
 
 def zoom_request(zoom):

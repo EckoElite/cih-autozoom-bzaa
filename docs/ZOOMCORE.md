@@ -73,7 +73,7 @@ the analyzer's playhead-first partial analysis is not built, so a long film wait
 
 ## Startup
 
-When the service starts (once per Kodi start), after the home screen is up, it runs `RunScript(<start_addon>)` (default `script.plexmod`) unless something is already playing or `open_at_start` is off. Kodi's `autoexec.py` did not run on this Kodi, and `RunAddon` opens PM4K as a plugin folder and fails.
+When the service starts (once per Kodi start), after Kodi has left its start-up animation (any window id from 10000 up, so it works whichever window Kodi starts in), it runs `RunScript(<start_addon>)` (default `script.plexmod`) unless something is already playing or `open_at_start` is off. Kodi's `autoexec.py` did not run on this Kodi, and `RunAddon` opens PM4K as a plugin folder and fails.
 
 ## Provisional timelines (a title being analysed for you)
 
@@ -118,3 +118,5 @@ No URL, token or key is written.
 * Wrong zoom for about 0.3 s after a seek or at start (G5, accepted); not yet measured with PM4K's start-then-seek.
 * Kodi's per-file view memory against the early start zoom: observed only in Spike A.
 * `verticalshift` units, subtitles (R13), HDR/DV under the new add-on, ramps in a real film on the Shield (T8).
+
+**Start-up time (measured 2026-10-30 with 	ools/measure_startup.py, Kodi restarted 3 times per setting):** from Kodi launch to PM4K's first window: 14.2 s (13.8 to 14.7) as installed; 9.1 s (8.4 to 10.0) with Kodi's start-up window set to Programs instead of Home (the ScopeNox Home screen builds its widgets with a Python script that competes with our service and PM4K for Kodi's one Python lock); 8.4 s (8.3 to 8.6) with also library update on start-up off, service.xbmc.versioncheck and script.grab.fanart disabled and the old 46-movie library emptied (entries only; no files). What remains: Kodi core and skin about 2.5 s, our service starting about 2 s later, PM4K's own start-up about 3.7 s.

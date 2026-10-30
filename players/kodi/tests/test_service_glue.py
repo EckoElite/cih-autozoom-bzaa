@@ -18,9 +18,10 @@ RPC_CALLS = []
 SETTINGS = {}
 DEFAULT_SETTINGS = {"enabled": True, "lead_ms": 100, "edge_bias": "centered", "band_top": 263, "band_bottom": 1897,
                     "scope_fill": False, "request_analysis": True, "poll_s": 0, "analyzer_url": "http://analyzer",
-                    "api_key": "", "open_at_start": True, "start_addon": "script.plexmod"}
+                    "api_key": "", "open_at_start": True, "start_addon": "script.plexmod", "ramp_stride": 1}
 INFO = {"Player.Process(videowidth)": "3,840", "Player.Process(videoheight)": "2,160", "Player.Process(videodar)": "1.78"}
 CONDITIONS = {}
+WINDOW = {"id": 10000}                                     # the window Kodi is showing (2999 while it starts up)
 BUILTINS = []
 
 
@@ -79,10 +80,13 @@ def install_stubs():
 
     xbmcaddon.Addon = Addon
 
+    xbmcgui = types.ModuleType("xbmcgui")
+    xbmcgui.getCurrentWindowId = lambda: WINDOW["id"]
+
     xbmcvfs = types.ModuleType("xbmcvfs")
     xbmcvfs.translatePath = lambda p: p
     xbmcvfs.mkdirs = lambda p: True
-    sys.modules.update({"xbmc": xbmc, "xbmcaddon": xbmcaddon, "xbmcvfs": xbmcvfs})
+    sys.modules.update({"xbmc": xbmc, "xbmcaddon": xbmcaddon, "xbmcvfs": xbmcvfs, "xbmcgui": xbmcgui})
     return xbmc
 
 
@@ -126,6 +130,7 @@ class GlueTests(unittest.TestCase):
         SETTINGS.clear()
         SETTINGS.update(DEFAULT_SETTINGS)
         CONDITIONS.clear()
+        WINDOW["id"] = 10000
         BUILTINS.clear()
         self.players = []
         self.client = None
@@ -325,7 +330,7 @@ class GlueTests(unittest.TestCase):
         player.onPlayBackStopped()
         self.assertTrue(found, self.zooms())
 
-    def test_kodi_opens_pm4k_once_its_home_screen_is_up(self):
+    def test_kodi_opens_pm4k_once_its_first_screen_is_up(self):
         class Mon:
             def __init__(self, abort_after=None):
                 self.waits = 0
@@ -335,10 +340,11 @@ class GlueTests(unittest.TestCase):
 
             def waitForAbort(self, seconds):
                 self.waits += 1
-                if self.waits == 3:                                   # the home screen appears after a second or so
-                    CONDITIONS["Window.IsActive(home)"] = True
+                if self.waits == 3:                                   # the first screen appears after a second or so
+                    WINDOW["id"] = 10001                              # (any window from 10000 up, not only Home)
                 return False
 
+        WINDOW["id"] = 2999                                           # still the start-up animation
         service.open_start_addon(Mon())
         self.assertEqual(BUILTINS, ["RunScript(script.plexmod)"])
         BUILTINS.clear()
