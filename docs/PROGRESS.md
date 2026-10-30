@@ -264,7 +264,7 @@ A zoom held fixed at 0.786 is clean (6% long gaps), so the loss comes from chang
 **Start-up (2026-10-30):** see the Startup section of docs/ZOOMCORE.md: 14.2 s to 8.4 s with the changes the user approved. Old Kodi library emptied (46 entries).
 
 **Confirmed by the user (2026-10-30):** edge_bias stays 
-o_spill. HDR is kept while the add-on zooms (R3, user's observation at the projector; the signal-info screen itself was not read out). Override button: the **0** key (Harmony to the Shield), bound in the playback windows only (keymap.zero.xml installed as userdata/keymaps/cih-override.xml, keymaps reloaded; not yet pressed during playback). TV Throwbacks and Concerts are added to the container.
+o_spill. HDR is kept while the add-on zooms (R3, user's observation at the projector; the signal-info screen itself was not read out). Override button: tried **0**; it did not work (during PM4K playback Kodi treats it as seek-to-a-typed-time, and a binding on the playback windows was ignored). Now the **Yellow** colour key, bound globally (keymap.override.xml, installed as userdata/keymaps/cih-override.xml; not yet pressed on the Shield). TV Throwbacks and Concerts are added to the container.
 
 **PM4K playback overlay (2026-10-30):** the overlay was laid out over the whole 1080-high GUI, so its top and bottom fell outside the 2.35 band. players/pm4k-osd/apply_osd_margin.py moves the 15 hard-coded positions in PM4K's script-plex-seek_dialog.xml and script-plex-video_settings_dialog.xml into rows 132 to 948 (GUI units), keeping *.cih-orig copies; installed on the Shield; the user looked at it and says it fits. A PM4K update restores the originals, so re-run the script after updating.
 
