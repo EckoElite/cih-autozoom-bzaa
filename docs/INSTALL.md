@@ -100,7 +100,7 @@ by an express worker (`EXPRESS_WORKERS`, one by default, which keeps working eve
 add-on shows the whole frame contained in the screen meanwhile, and switches to the right zoom when the timeline
 arrives. A film or episode that keeps one ratio takes a few minutes (the survey reads a few percent of the file); one that
 changes takes as long as the full pass. Plex ids are matched to files by folder and file name when no `PATH_MAP` rule
-covers the Plex path.
+covers the Plex path. If files were already queued before `ON_DEMAND_ROOTS` was set (the first scan ran without it), the next scan puts the ones nobody asked for back to "on demand".
 
 ## 4. Settings
 

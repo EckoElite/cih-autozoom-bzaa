@@ -60,6 +60,20 @@ def test_an_idle_file_is_queued_at_priority_when_asked_for_and_not_by_a_rescan(t
     store.close()
 
 
+def test_files_queued_before_the_folder_was_marked_on_demand_go_back_to_waiting_for_a_player(tmp_path):
+    movies, tv = libraries(tmp_path)
+    store = Store(tmp_path / "s.sqlite")
+    scan_media([tv], store, "0.3.8")  # the first scan, before ON_DEMAND_ROOTS was set: everything is queued
+    assert store.counts() == {"queued": 2}
+    asked = f"{tv}/s01e02.mkv"
+    store.requeue(asked, PRIORITY_DEMAND)  # a player asked for this one meanwhile
+    summary = scan_media([tv], store, "0.3.8", on_demand_roots=(tv,))
+    assert summary.idled == 1 and summary.new == 0
+    assert store.get(f"{tv}/s01e01.mkv")["status"] == "idle"
+    assert store.get(asked)["status"] == "queued" and store.get(asked)["priority"] == PRIORITY_DEMAND
+    store.close()
+
+
 def test_an_analysed_episode_that_changes_goes_back_to_idle_and_a_new_version_does_not_queue_it(tmp_path):
     movies, tv = libraries(tmp_path)
     store = Store(tmp_path / "s.sqlite")

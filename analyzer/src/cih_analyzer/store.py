@@ -141,7 +141,8 @@ class Store:
         on_demand: bool = False,
     ) -> str:
         """Record a file the scanner saw. Returns `new`, `changed` (its timeline is dropped and it is queued again),
-        `reanalyze` (the analyzer's major version moved on), `returned` (it had been missing) or `unchanged`.
+        `reanalyze` (the analyzer's major version moved on), `returned` (it had been missing), `idled` (on demand, but it was
+        queued in the background before that was set) or `unchanged`.
 
         With `on_demand` (a library analysed only when a player asks for a title) a file is kept `idle` instead of
         queued, and a new analyzer version does not queue it: it is analysed when asked for."""
@@ -149,7 +150,8 @@ class Store:
         waiting = "idle" if on_demand else "queued"
         with self._lock:
             row = self._one(
-                "SELECT status, size, mtime, analyzer_version, timeline FROM files WHERE path = ?", (path,)
+                "SELECT status, priority, size, mtime, analyzer_version, timeline FROM files WHERE path = ?",
+                (path,),
             )
             if row is None:
                 self._run(
@@ -170,6 +172,11 @@ class Store:
                 self._run("UPDATE files SET status=?, queued_at=? WHERE path=?", (status, now, path))
                 return "returned"
             if on_demand:
+                if row["status"] == "queued" and not row["timeline"] and row["priority"] >= PRIORITY_BACKLOG:
+                    # queued in the background before this folder was marked on demand (the setting was added after
+                    # the first scan): put it back to waiting for a player
+                    self._run("UPDATE files SET status='idle' WHERE path=?", (path,))
+                    return "idled"
                 return "unchanged"
             if row["status"] == "done" and major_of(row["analyzer_version"]) != major_of(version):
                 self._run(

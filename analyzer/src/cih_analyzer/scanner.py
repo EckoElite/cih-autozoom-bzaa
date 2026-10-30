@@ -27,6 +27,9 @@ class ScanSummary:
     new: int = 0
     changed: int = 0
     reanalyze: int = 0
+    idled: int = (
+        0  # queued in the background before their folder was marked on demand, now waiting for a player
+    )
     returned: int = 0
     skipped: int = 0
     missing: int = 0
