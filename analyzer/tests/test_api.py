@@ -88,13 +88,27 @@ def test_the_worker_count_is_set_and_reported_through_the_api(api):
     assert status["scheduler"]["workers"] == 5 and status["settings"]["concurrency"] == 5
     assert status["settings"]["concurrency_env"] == 1  # what the CONCURRENCY setting said
     assert store.get_meta("workers") == "5"
-    for bad in (-1, 17, "x"):
+    for bad in (0, 17, "x"):
         assert client.post("/api/v1/concurrency", json={"workers": bad}).status_code == 422
     assert sched.workers == 5
     assert status["settings"]["concurrency_saved"] == "5" and status["settings"]["start_paused"] is False
     assert client.delete("/api/v1/concurrency").json() == {"workers": 1, "max_workers": 16}
     after = client.get("/api/v1/status").json()["settings"]
     assert after["concurrency"] == 1 and after["concurrency_saved"] is None
+
+
+def test_pause_says_how_many_files_keep_running_and_stop_now_says_how_many_it_stopped(api):
+    client, store, sched, root, local = api
+    (root / "Other.mkv").write_bytes(b"x" * 10)
+    sched.scan_now()
+    store.claim_next()  # one file is running
+    assert client.post("/api/v1/pause").json() == {"paused": "paused", "running": 1}
+    assert sched.paused_reason() == "paused"
+    assert client.post("/api/v1/resume").json() == {"paused": None}
+    assert client.post("/api/v1/stop-now").json() == {
+        "paused": "paused",
+        "stopped": 0,
+    }  # nothing owned by a worker here
 
 
 def test_the_queue_carries_progress_for_running_files_only(api):
@@ -239,7 +253,7 @@ def test_ramp_endpoint_joins_the_fitted_curve_to_what_was_measured(api):
 
 def test_pause_resume_scan_and_plex_controls(api):
     client, store, sched, root, local = api
-    assert client.post("/api/v1/pause").json() == {"paused": "paused"}
+    assert client.post("/api/v1/pause").json() == {"paused": "paused", "running": 0}
     assert client.get("/api/v1/status").json()["scheduler"]["paused"] == "paused"
     assert client.post("/api/v1/resume").json() == {"paused": None}
     assert client.post("/api/v1/plex-sync").status_code == 409

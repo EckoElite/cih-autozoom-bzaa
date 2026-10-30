@@ -46,7 +46,7 @@ class OverrideBody(Target):
 
 
 class WorkersBody(BaseModel):
-    workers: int = Field(ge=0, le=MAX_WORKERS)
+    workers: int = Field(ge=1, le=MAX_WORKERS)
 
 
 def _brief(row: dict[str, Any]) -> dict[str, Any]:
@@ -274,8 +274,16 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
 
     @app.post("/api/v1/pause", dependencies=secured)
     def pause() -> dict[str, Any]:
+        """Start no new file. The files being analysed carry on and finish; `running` says how many."""
         scheduler.pause()
-        return {"paused": scheduler.paused_reason()}
+        return {"paused": scheduler.paused_reason(), "running": store.counts().get("running", 0)}
+
+    @app.post("/api/v1/stop-now", dependencies=secured)
+    def stop_now() -> dict[str, Any]:
+        """Pause and kill every file being analysed. Each goes back in the queue and starts again from the beginning
+        after Resume; `stopped` says how many were killed."""
+        stopped = scheduler.stop_now()
+        return {"paused": scheduler.paused_reason(), "stopped": stopped}
 
     @app.post("/api/v1/resume", dependencies=secured)
     def resume() -> dict[str, Any]:

@@ -21,6 +21,9 @@
   input[type=search] { flex:1 1 220px; min-width:0; }
   .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
   .bad { color:var(--bad); } .ok { color:var(--ok); } .warn { color:var(--warn); }
+  .banner { border:1px solid var(--warn); border-radius:6px; padding:8px 12px; color:var(--warn); margin:8px 0; }
+  button.danger { border-color:var(--bad); color:var(--bad); }
+  button.danger.armed { background:var(--bad); color:#fff; font-weight:600; }
 
   /* one entry per file, readable at any width: the name wraps, the folder sits under it, nothing is squeezed into columns */
   .list { display:flex; flex-direction:column; gap:8px; }
@@ -72,14 +75,18 @@
     <div class="cards" id="cards"></div>
     <p class="muted" id="sched"></p>
     <div class="row">
-      <button id="pause">Pause</button><button id="resume">Resume</button>
+      <button id="pause" title="Start no new file. Files being analysed carry on and finish.">Pause</button><button id="resume">Resume</button>
+      <button id="stop" class="danger" title="Kill the files being analysed. They go back in the queue and start over after Resume.">Stop now</button>
+    </div>
+    <p id="pausebanner" class="banner" hidden></p>
+    <div class="row">
       <button id="scan">Scan media now</button><button id="plex">Sync Plex now</button>
     </div>
     <div class="row">
-      <label>Files analysed at once <input type="number" id="workers" min="0" max="16" inputmode="numeric" style="width:4.5em"></label>
+      <label>Files analysed at once <input type="number" id="workers" min="1" max="16" inputmode="numeric" style="width:4.5em"></label>
       <button id="setworkers">Apply</button><button id="resetworkers" title="Forget the saved count and use the CONCURRENCY setting from the container template">Use template setting</button>
     </div>
-    <p class="muted" id="workershint">Raising it starts more now; lowering it lets running files finish and takes no new ones; 0 starts nothing new. Saved across restarts.</p>
+    <p class="muted" id="workershint">Raising it starts more now; lowering it lets running files finish and takes no new ones. To start nothing new, use Pause. Saved across restarts.</p>
   </section>
 
   <section>
@@ -212,10 +219,19 @@ async function refresh() {
     const sc = s.scheduler;
     const wi = $("workers"); wi.max = s.settings.max_workers;
     if (!workersEdited) wi.value = sc.workers;  // never overwrite a number the user has typed and not yet applied
-    $("workershint").textContent = "Raising it starts more now; lowering it lets running files finish and takes no new ones; 0 starts nothing new. " +
+    $("workershint").textContent = "Raising it starts more now; lowering it lets running files finish and takes no new ones. To start nothing new, use Pause. " +
       (s.settings.concurrency_saved ? "Saved across restarts (template says " + s.settings.concurrency_env + "). " : "Using the template setting (" + s.settings.concurrency_env + "). ") +
       (s.settings.start_paused ? "The template starts the container paused." : "");
-    $("sched").textContent = (sc.paused ? "Paused: " + sc.paused + ". " : "Running. ") + sc.busy + " of " + sc.workers + " worker(s) busy" +
+    const banner = $("pausebanner");
+    banner.hidden = !sc.paused;
+    if (sc.paused) {
+      const why = { paused: "Paused", "quiet-hours": "Paused (quiet hours)", "plex-transcode": "Paused (Plex is transcoding)" }[sc.paused] || "Paused";
+      banner.textContent = why + ". " + (sc.busy > 0
+        ? "The " + sc.busy + " file(s) running below keep going until they finish. "
+        : "Nothing is running. ") + "Nothing new will start" + (sc.paused === "paused" ? " until you press Resume." : " until this ends.");
+    }
+    armStop(sc.busy);
+    $("sched").textContent = (sc.paused ? "" : "Running. ") + sc.busy + " of " + sc.workers + " worker(s) busy" +
       (sc.busy > sc.workers ? " (" + (sc.busy - sc.workers) + " finishing, then stopping)" : "") + ". " +
       (sc.last_scan ? "Last scan " + when(sc.last_scan.at) + " (" + sc.last_scan.seen + " files). " : "") +
       (s.plex.enabled ? (sc.last_plex ? (sc.last_plex.error ? "Plex: " + sc.last_plex.error : "Plex synced " + when(sc.last_plex.at) + " (" + sc.last_plex.matched + " matched).") : "Plex not synced yet.") : "Plex not configured.");
@@ -302,8 +318,42 @@ function plot(r) {
 }
 $("go").onclick = search; $("q").onkeydown = (e) => { if (e.key === "Enter") search(); };
 $("vars").onclick = async () => renderResults(await json("/api/v1/files?var=1&limit=200") || []);
-$("pause").onclick = async () => { await json("/api/v1/pause", { method: "POST" }); refresh(); };
-$("resume").onclick = async () => { await json("/api/v1/resume", { method: "POST" }); refresh(); };
+$("pause").onclick = async () => {
+  const r = await json("/api/v1/pause", { method: "POST" });
+  await refresh();
+  note(r.running > 0
+    ? "Paused. The " + r.running + " running file(s) will finish; nothing new will start until you press Resume."
+    : "Paused. Nothing is running; nothing will start until you press Resume.", "warn", 10);
+};
+$("resume").onclick = async () => {
+  await json("/api/v1/resume", { method: "POST" });
+  await refresh();
+  note("Resumed. New files start within about 15 seconds.", "ok", 8);
+};
+
+// Stop now kills work in progress, so it takes two clicks: the first arms it (and says what it will do), the second,
+// within 6 seconds, does it. Anything else disarms it.
+let stopArmedUntil = 0, stopTimer = null;
+function disarmStop() { stopArmedUntil = 0; clearTimeout(stopTimer); const b = $("stop"); b.classList.remove("armed"); b.textContent = "Stop now"; }
+function armStop(busy) { if (stopArmedUntil && busy === 0) disarmStop(); }
+$("stop").onclick = async () => {
+  if (Date.now() < stopArmedUntil) {
+    disarmStop();
+    try {
+      const r = await json("/api/v1/stop-now", { method: "POST" });
+      await refresh();
+      note(r.stopped > 0
+        ? "Stopped " + r.stopped + " file(s). They are back in the queue and start over after Resume. Analysis is paused."
+        : "Nothing was running. Analysis is paused.", "warn", 12);
+    } catch (e) { note("Could not stop: " + e.message, "bad", 8); }
+    return;
+  }
+  stopArmedUntil = Date.now() + 6000;
+  $("stop").classList.add("armed");
+  $("stop").textContent = "Click again to kill running files";
+  note("This kills the files being analysed; their progress is lost and they start over. Click Stop now again within 6 seconds to confirm.", "warn", 6);
+  stopTimer = setTimeout(disarmStop, 6000);
+};
 $("scan").onclick = async () => { await json("/api/v1/scan", { method: "POST" }); note("Scan started"); };
 $("plex").onclick = async () => { try { await json("/api/v1/plex-sync", { method: "POST" }); note("Plex sync started"); } catch (e) { note(e.message, "bad"); } };
 $("workers").oninput = () => { workersEdited = true; };

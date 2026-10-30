@@ -280,6 +280,14 @@ class Store:
             )
             return True
 
+    def requeue_one_running(self, path: str) -> bool:
+        """A running job that was stopped (not failed) goes back in the queue with its priority kept."""
+        return bool(
+            self._run(
+                "UPDATE files SET status='queued', started_at=NULL WHERE path=? AND status='running'", (path,)
+            )
+        )
+
     def requeue_running(self) -> int:
         """At start-up: a job that was running when the container stopped goes back in the queue."""
         return self._run("UPDATE files SET status='queued', started_at=NULL WHERE status='running'")

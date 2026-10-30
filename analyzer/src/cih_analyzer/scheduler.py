@@ -184,6 +184,8 @@ class Scheduler:
         self.pathmap = pathmap
         self._progress: dict[str, dict] = {}
         self._progress_lock = threading.Lock()
+        self._job_stops: dict[str, threading.Event] = {}  # one per running file, so one can be stopped alone
+        self._job_lock = threading.Lock()
         self.runner: Runner = runner or (
             lambda path, timeout, stop: subprocess_runner(
                 path,
@@ -219,7 +221,7 @@ class Scheduler:
         saved = self.store.get_meta(WORKERS_META)
         if saved:  # an empty value is a cleared count
             try:
-                return max(0, min(MAX_WORKERS, int(saved)))
+                return max(1, min(MAX_WORKERS, int(saved)))
             except ValueError:
                 log.warning("ignoring the saved worker count %r", saved)
         return max(1, min(MAX_WORKERS, self.settings.concurrency))
@@ -230,11 +232,11 @@ class Scheduler:
 
     def set_workers(self, count: int) -> int:
         """Change how many analyses run at once, without stopping any that are running. Raising it starts workers
-        now; lowering it lets the surplus workers finish the file they are on and then stop taking new ones. Zero
-        means no new file starts at all (the ones running finish). The count is saved, so it survives a restart and
-        takes the place of the CONCURRENCY setting."""
-        if not 0 <= count <= MAX_WORKERS:
-            raise ValueError(f"the worker count must be from 0 to {MAX_WORKERS}")
+        now; lowering it lets the surplus workers finish the file they are on and then stop taking new ones. (To
+        start nothing new at all, pause.) The count is saved, so it survives a restart and takes the place of the
+        CONCURRENCY setting."""
+        if not 1 <= count <= MAX_WORKERS:
+            raise ValueError(f"the worker count must be from 1 to {MAX_WORKERS}")
         self.store.set_meta(WORKERS_META, str(count))
         return self.set_workers_unsaved(count)
 
@@ -273,7 +275,18 @@ class Scheduler:
     # ---- throttling ----------------------------------------------------------------------------------------------
 
     def pause(self) -> None:
+        """Start no new file. Files being analysed carry on and finish."""
         self._manual_pause = True
+
+    def stop_now(self) -> int:
+        """Pause, and kill every file being analysed: each goes back in the queue (priority kept) and starts again
+        from the beginning when analysis is resumed. Returns how many were stopped."""
+        self.pause()
+        with self._job_lock:
+            events = list(self._job_stops.values())
+        for event in events:
+            event.set()
+        return len(events)
 
     def resume(self) -> None:
         self._manual_pause = False
@@ -316,15 +329,22 @@ class Scheduler:
         except OSError as exc:
             self.store.fail(path, f"cannot read the file: {exc.strerror}")
             return True
+        job_stop = threading.Event()
+        with self._job_lock:
+            self._job_stops[path] = job_stop
+        if self.stop_event.is_set():
+            job_stop.set()
         try:
-            result = self.runner(path, self.settings.analysis_timeout_s, self.stop_event)
+            result = self.runner(path, self.settings.analysis_timeout_s, job_stop)
         except Exception as exc:  # noqa: BLE001 - a bad file must never stop the worker
             result = RunResult(error=redact(f"{type(exc).__name__}: {exc}"))
         finally:
+            with self._job_lock:
+                self._job_stops.pop(path, None)
             with self._progress_lock:
                 self._progress.pop(path, None)
         if result.error == "stopped":
-            self.store.requeue_running()
+            self.store.requeue_one_running(path)
             return True
         try:
             after = os.stat(path)
@@ -461,6 +481,9 @@ class Scheduler:
 
     def stop(self, timeout: float = 10.0) -> None:
         self.stop_event.set()
+        with self._job_lock:
+            for event in self._job_stops.values():
+                event.set()
         with self._workers_lock:
             workers = list(self._workers.values())
         for t in [*self._threads, *workers]:

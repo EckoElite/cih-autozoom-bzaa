@@ -256,14 +256,19 @@ def test_the_worker_count_changes_while_running_and_never_interrupts_a_job(tmp_p
     store.close()
 
 
-def test_zero_workers_lets_the_running_file_finish_and_starts_nothing_new(tmp_path):
+def _two_files(tmp_path, **settings):
     root = tmp_path / "media"
     root.mkdir()
-    for name in ("a.mkv", "b.mkv"):
+    for name in ("a.mkv", "b.mkv", "c.mkv"):
         (root / name).write_bytes(b"x" * 10)
     base = str(root).replace("\\", "/")
     store = Store(tmp_path / "s.sqlite")
-    settings = Settings(config_dir=tmp_path, media_roots=(base,), scan_interval_s=60, concurrency=1)
+    return store, Settings(config_dir=tmp_path, media_roots=(base,), scan_interval_s=60, **settings)
+
+
+def test_pause_lets_the_running_files_finish_and_starts_nothing_new(tmp_path, monkeypatch):
+    monkeypatch.setattr("cih_analyzer.scheduler.PAUSED_POLL_S", 0.1)
+    store, settings = _two_files(tmp_path, concurrency=1)
     gate = threading.Event()
     started: list[str] = []
 
@@ -277,27 +282,64 @@ def test_zero_workers_lets_the_running_file_finish_and_starts_nothing_new(tmp_pa
     sched.start()
     try:
         assert wait_for(lambda: len(started) == 1)
-        assert sched.set_workers(0) == 0 and sched.status()["workers"] == 0
+        sched.pause()
         gate.set()
         assert wait_for(lambda: store.counts().get("done") == 1)  # the running file was not cut off
         time.sleep(0.5)
-        assert len(started) == 1 and store.counts() == {"done": 1, "queued": 1}
-        assert wait_for(lambda: sched._workers == {})
-        sched.set_workers(1)  # and raising it again picks the queue back up
-        assert wait_for(lambda: store.counts() == {"done": 2})
+        assert len(started) == 1 and store.counts() == {"done": 1, "queued": 2}
+        sched.resume()
+        assert wait_for(lambda: store.counts() == {"done": 3})
     finally:
         gate.set()
         sched.stop(5)
-    assert Scheduler(settings, store, PathMap()).workers == 1
-    sched.set_workers(0)
-    assert Scheduler(settings, store, PathMap()).workers == 0  # a saved zero stays zero after a restart
     store.close()
+
+
+def test_stop_now_kills_what_is_running_queues_it_again_and_pauses(tmp_path, monkeypatch):
+    monkeypatch.setattr("cih_analyzer.scheduler.PAUSED_POLL_S", 0.1)
+    store, settings = _two_files(tmp_path, concurrency=2)
+    released = threading.Event()
+    started: list[str] = []
+    killed: list[str] = []
+
+    def runner(path, timeout, stop):
+        started.append(path)
+        if not released.is_set():
+            stop.wait(20)  # a job runs until it is stopped, like the real worker process
+            if stop.is_set():
+                killed.append(path)
+                return RunResult(error="stopped")
+        return RunResult(timeline=timeline(path))
+
+    sched = Scheduler(settings, store, PathMap(), runner=runner)
+    sched.scan_now()
+    sched.start()
+    try:
+        assert wait_for(lambda: store.counts().get("running") == 2)
+        assert sched.stop_now() == 2
+        assert wait_for(lambda: len(killed) == 2)
+        assert wait_for(lambda: store.counts() == {"queued": 3})  # both back in the queue, none failed
+        assert sched.paused_reason() == "paused"
+        time.sleep(0.5)
+        assert len(started) == 2  # nothing restarted behind the user's back
+        released.set()
+        sched.resume()
+        assert wait_for(lambda: store.counts() == {"done": 3})
+    finally:
+        released.set()
+        sched.stop(5)
+    store.close()
+
+
+def test_stop_now_with_nothing_running_just_pauses(env):
+    sched, store, root, calls = env
+    assert sched.stop_now() == 0 and sched.paused_reason() == "paused"
 
 
 def test_the_worker_count_is_validated_and_does_not_start_workers_before_start(env):
     sched, store, root, calls = env
-    for bad in (-1, 17):
-        with pytest.raises(ValueError, match="0 to 16"):
+    for bad in (0, -1, 17):
+        with pytest.raises(ValueError, match="1 to 16"):
             sched.set_workers(bad)
     assert sched.set_workers(2) == 2 and sched._workers == {} and calls == []
 
