@@ -100,6 +100,45 @@ def test_a_dim_or_partial_larger_sample_is_still_flicker():
     ]  # opened on both sides alike: a real bigger picture
 
 
+def _pillar_shot(times, *, yavg=74.0, skew_x=8, skew_y=80, rect=(256, 0, 3328, 2160)):
+    """A full-height shot with dark sides and a dark strip along the bottom, as seen in Dunkirk: 1.54 at 4K, not a\n    standard ratio. The crop is centred on the smaller margin (0); the larger one (`skew_y`) is the dark strip."""
+    return [Sample(t, *rect, yavg, max(skew_x, skew_y), skew_x, skew_y) for t in times]
+
+
+def test_a_short_full_height_shot_at_an_odd_ratio_among_2_20_ones_is_kept_for_checking():
+    # 3328x2160 for two samples inside a 2.20 stretch: at 2.20's zoom it would hang over the screen by 24%
+    samples = run(0, 20, 2.20) + _pillar_shot([20.0, 21.0]) + run(22, 40, 2.20)
+    result = segment_samples(samples, make_info(duration=40.0))
+    assert [s.rect[3] for s in result.segments] == [1746, 2160, 1746]
+    assert result.segments[1].needs_verification  # refinement measures it at full resolution
+
+
+def test_a_short_bigger_run_beside_a_bigger_stretch_goes_into_that_one_not_the_longer_smaller_one():
+    # Dunkirk: 90 s of 2.20, then two samples of a full-height shot, then a long full-frame stretch. The full-height
+    # shot is where the full-frame stretch begins; absorbing it into the longer 2.20 stretch leaves it 24% too big
+    samples = run(0, 90, 2.20) + _pillar_shot([90.0, 91.0]) + run(92, 140, R_1_78)
+    result = segment_samples(samples, make_info(duration=140.0))
+    assert [(round(s.start, 1), s.rect[3]) for s in result.segments] == [(0.0, 1746), (90.0, 2160)]
+
+
+def test_a_bigger_shot_that_grew_on_one_side_or_was_seen_once_or_is_dim_is_still_flicker():
+    base = run(0, 20, 2.20), run(22, 40, 2.20)
+    for shot in (
+        _pillar_shot([20.0, 21.0], skew_y=200),  # the matte is still there on one side (208 px): a subtitle
+        _pillar_shot([20.0]),  # a single sample
+        _pillar_shot([20.0, 21.0], yavg=30.0),  # too dark to vouch for
+    ):
+        result = segment_samples(base[0] + shot + base[1], make_info(duration=40.0))
+        assert [s.rect[3] for s in result.segments] == [1746]
+
+
+def test_a_short_shot_smaller_than_its_neighbours_is_never_a_bigger_shot():
+    result = segment_samples(
+        run(0, 20, R_1_78) + run(20, 22, 2.39) + run(22, 40, R_1_78), make_info(duration=40.0)
+    )
+    assert [s.aspect for s in result.segments] == [R_1_78]
+
+
 def test_a_studio_logo_at_16_9_before_a_scope_film_is_two_segments():
     result = segment_samples(run(0, 4, R_1_78) + run(4, 40, 2.39), make_info(duration=40.0))
     assert segs(result) == [(0.0, 3.0, R_1_78), (4.0, 40.0, 2.39)]

@@ -20,7 +20,7 @@ from .skip import inspect_file
 
 USAGE = (
     "usage: python -m cih_analyzer [--analyze | --analyze-envelope] [--sample-interval SECONDS] "
-    "[--progress-file PATH] <file> [<file> ...]"
+    "[--survey-interval SECONDS] [--progress-file PATH] <file> [<file> ...]"
 )
 
 
@@ -41,15 +41,21 @@ def progress_writer(path: str) -> Callable[[str, float], None]:
 
 def main(argv: list[str]) -> int:
     interval: float | None = None
+    survey: float | None = None
     progress_path: str | None = None
-    if "--sample-interval" in argv:
-        at = argv.index("--sample-interval")
-        try:
-            interval = float(argv[at + 1])
-        except (IndexError, ValueError):
-            print(USAGE, file=sys.stderr)
-            return 2
-        argv = argv[:at] + argv[at + 2 :]
+    for flag in ("--sample-interval", "--survey-interval"):
+        if flag in argv:
+            at = argv.index(flag)
+            try:
+                value = float(argv[at + 1])
+            except (IndexError, ValueError):
+                print(USAGE, file=sys.stderr)
+                return 2
+            argv = argv[:at] + argv[at + 2 :]
+            if flag == "--sample-interval":
+                interval = value
+            else:
+                survey = value
     if "--progress-file" in argv:
         at = argv.index("--progress-file")
         if at + 1 >= len(argv):
@@ -67,6 +73,8 @@ def main(argv: list[str]) -> int:
             outcome = analyze_file(
                 paths[0],
                 sample_interval_s=interval,
+                survey_interval_s=survey,
+                known_variable_file=os.environ.get("KNOWN_VARIABLE_FILE", ""),
                 progress=progress_writer(progress_path) if progress_path else None,
             )
         except Exception as exc:  # noqa: BLE001 - say what went wrong in one line, with an exit code of its own

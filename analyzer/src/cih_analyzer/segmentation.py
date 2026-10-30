@@ -26,6 +26,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from .coarse import Sample
+from .geometry import EQUIVALENT_ZOOM, picture_zoom
 from .probe import VideoInfo
 
 PRESETS = (4 / 3, 16 / 9, 1.85, 1.90, 2.00, 2.20, 2.35, 2.39, 2.40)
@@ -42,6 +43,8 @@ FULL_FRAME_SHARE = 0.9  # a picture this much of the frame in both directions (1
 INSERT_MIN_YAVG = 40.0  # a sample must be at least this bright (0..255) to vouch for a full-frame insert
 INSERT_MAX_SKEW = 0.02  # of the frame height: a real bigger picture opens the matte on both sides alike
 INSERT_LARGER_BY = 0.9  # the pictures either side must cover at most this share of the insert's area
+MIN_INSERT_SAMPLES = 2  # a bigger shot that is not full frame has to be seen at least this often to count
+MIN_INSERT_AREA = 0.5  # of the frame: a smaller picture is content on black, not a shot
 
 
 @dataclass(frozen=True)
@@ -173,9 +176,55 @@ class _Context:
         min_samples: int,
         end: float,
         frame: tuple[int, int] = (0, 0),
+        info: VideoInfo | None = None,
     ):
         self.params, self.gap, self.min_samples, self.end = params, gap, min_samples, end
         self.frame = frame  # the container's width and height
+        self.info = info
+
+    def is_bigger_shot(self, runs: list[_Run], i: int) -> bool:
+        """A short run of at least two bright samples whose picture is clearly bigger than the pictures either side
+        (it would hang over the screen if played at their zoom): a real shot at another ratio, not flicker, whatever
+        its ratio. Dropping it as flicker would leave that shot too big for the screen, so it is kept for the
+        refinement pass to check at full resolution. Growth on one side only (a subtitle, a bright object in the
+        matte) is not a bigger picture; that is judged on the axis along which the picture grew."""
+        run = runs[i]
+        width, height = self.frame
+        if self.info is None or not (width and height) or len(run.samples) < MIN_INSERT_SAMPLES:
+            return False
+        x, y, w, h = run.rect
+        if w * h < MIN_INSERT_AREA * width * height:
+            return False
+        if min(s.yavg for s, _ in run.samples) < INSERT_MIN_YAVG:
+            return False
+        beside = [runs[j] for j in (i - 1, i + 1) if 0 <= j < len(runs)]
+        if not beside:
+            return False
+        zoom = picture_zoom(run.rect, self.info)
+        if not all(zoom < picture_zoom(r.rect, self.info) / (1 + EQUIVALENT_ZOOM) for r in beside):
+            return False
+        # the axis along which it grew has to reach the edge of the frame (a 2.16 crop among 2.39 ones is not enough:
+        # that is what a subtitle does), or it is not a bigger shot but a slightly different crop
+        grown_y = (
+            h > max(r.rect[3] for r in beside) + INSERT_MAX_SKEW * height and h >= FULL_FRAME_SHARE * height
+        )
+        grown_x = (
+            w > max(r.rect[2] for r in beside) + INSERT_MAX_SKEW * width and w >= FULL_FRAME_SHARE * width
+        )
+        if not (grown_y or grown_x):
+            return False
+        # A crop is the picture's smaller margin on both sides; its larger margin is the smaller plus `skew`. A real
+        # bigger picture has opened the matte on both sides, so even the larger margin is smaller than the matte beside
+        # it. A subtitle opens one side only: its other margin is still the matte's. (Dark picture at one edge looks
+        # like the first and is the second only where it is not as wide as the matte.)
+        room_y = min(r.rect[1] for r in beside) - INSERT_MAX_SKEW * height
+        room_x = min(r.rect[0] for r in beside) - INSERT_MAX_SKEW * width
+        for s, _ in run.samples:
+            skew_x = s.skew if s.skew_x is None else s.skew_x
+            skew_y = s.skew if s.skew_y is None else s.skew_y
+            if (grown_y and s.y + skew_y > room_y) or (grown_x and s.x + skew_x > room_x):
+                return False
+        return True
 
     def is_full_frame_insert(self, runs: list[_Run], i: int) -> bool:
         """A short run whose picture fills the whole frame on bright samples, between smaller pictures: a real shot
@@ -337,7 +386,8 @@ def _merge_short(
         shorts = [
             i
             for i, r in enumerate(runs)
-            if ctx.is_short(r, durations[i]) and not ctx.is_full_frame_insert(runs, i)
+            if ctx.is_short(r, durations[i])
+            and not (ctx.is_full_frame_insert(runs, i) or ctx.is_bigger_shot(runs, i))
         ]
         if not shorts:
             break
@@ -351,6 +401,13 @@ def _merge_short(
             del runs[i : i + 2]
         else:
             into_left = left is not None and (right is None or durations[i - 1] >= durations[i + 1])
+            if left is not None and right is not None and ctx.info is not None:
+                # Absorbing a bigger picture into a smaller one leaves that shot too big for the screen, so a
+                # neighbour whose picture is at least as big as this run's is the better host, however short.
+                need = picture_zoom(runs[i].rect, ctx.info) * (1 + EQUIVALENT_ZOOM)
+                fits = [picture_zoom(r.rect, ctx.info) <= need for r in (left, right)]
+                if fits[0] != fits[1]:
+                    into_left = fits[0]
             host = runs[i - 1 if into_left else i + 1]
             host.samples.extend(runs[i].samples)
             host.samples.sort(key=lambda s: s[0].t)
@@ -418,7 +475,7 @@ def segment_samples(
     all_gaps = [b.t - a.t for a, b in zip(ordered, ordered[1:], strict=False)]
     gap = statistics.median(all_gaps) if all_gaps else 1.0
     min_samples = params.min_samples if gap <= params.min_segment_s / 2 else 1
-    ctx = _Context(params, gap, min_samples, end, (info.width, info.height))
+    ctx = _Context(params, gap, min_samples, end, (info.width, info.height), info)
 
     runs, chains = _extract_ramps(_build_runs(labelled, rect_tolerance(info)), ctx)
     runs_with_chains = _merge_with_ramps(runs, chains, ctx)

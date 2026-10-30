@@ -113,7 +113,9 @@ All settings are environment variables; change them by editing the container and
 | `QUIET_HOURS` | | `HH:MM-HH:MM` local time when analysis pauses |
 | `START_PAUSED` | `0` | `1` starts with analysis paused until Resume on the status page; the queue still fills, so chosen files can be put first (search the title, then "Analyze again") before anything runs |
 | `PAUSE_ON_TRANSCODE` | `1` | pause while Plex transcodes video |
-| `SAMPLE_INTERVAL` | `1` | seconds between sampled keyframes (at least 1) |
+| `SURVEY_INTERVAL` | `8` | seconds between the places the quick first survey looks at (at least 2; `0` turns it off). A file that shows one picture throughout is finished by the survey; any other file gets the full pass. A short change that falls between two places, in a film that never changes otherwise, is missed |
+| `KNOWN_VARIABLE_FILE` | | optional text file (for example `/config/known_variable.txt`), one `Title (Year)` per line, of extra films that change ratio; they skip the survey and get the full pass, like the titles bundled with the analyzer |
+| `SAMPLE_INTERVAL` | `1` | seconds between sampled keyframes in the full pass (at least 1) |
 | `SAMPLE_INTERVALS` | | per-folder overrides, `prefix=seconds;prefix=seconds` |
 | `SCAN_INTERVAL` | `3600` | seconds between scans of the media folders |
 | `PLEX_INTERVAL` | `900` | seconds between reads of Plex |

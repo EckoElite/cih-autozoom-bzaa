@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Literal
 
 from .frames import Edges, ScanFrame, matte_levels, matte_threshold, scan_edges, threshold_from
+from .geometry import EQUIVALENT_ZOOM, picture_zoom
 from .probe import VideoInfo
 from .ramps import FitFrame, RampParams, analyze_transition, reference_edges
 from .segmentation import (
@@ -550,22 +551,10 @@ MIN_SEGMENT_S = (
 )
 MIN_EXCURSION_S = 3.0  # a ramp that starts with a cut to a smaller picture must take at least this long
 MIN_PICTURE_SHARE = 0.5  # of the frame's area: a smaller "picture" is content on black, not a picture
-EQUIVALENT_ZOOM = 0.03  # two rectangles whose zoom differs by less than this are the same for playback
-_BAND = (
-    3840 / 2.35 / 2160
-)  # the screen band's height as a share of the 16:9 output frame (nominal 2.35 screen)
 
 
 def _zoom(rect: Rect, info: VideoInfo) -> float:
-    """How much the player would scale this picture to fit the screen band (relative; the 16:9 output frame and a
-    nominal 2.35 screen), used only to tell whether two rectangles differ enough to matter."""
-    pw, ph = rect[2] / info.width, rect[3] / info.height
-    dar = info.dar if info.dar > 0 else 16 / 9
-    if dar >= 16 / 9:  # the frame fills the output's width
-        ph *= (16 / 9) / dar
-    else:  # the frame fills the output's height
-        pw *= dar / (16 / 9)
-    return min(1 / pw, _BAND / ph)
+    return picture_zoom(rect, info)
 
 
 def _trusted(b: RefinedBoundary) -> bool:

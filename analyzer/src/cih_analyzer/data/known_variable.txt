@@ -1,0 +1,60 @@
+# Titles known to change aspect ratio in at least one release. A title here skips the survey and gets the detailed
+# pass; being listed does not mean a given file is variable. One "Title (Year)" per line; "#" starts a comment.
+#
+# Sources: Wikipedia, "List of IMAX films" (feature films shot partly with IMAX film cameras), plus well-documented
+# variable-ratio releases. Title and year must match the file's name or its folder's (case, punctuation and a leading
+# "The" do not matter).
+
+# shot partly on IMAX film cameras (Wikipedia)
+The Dark Knight (2008)
+Transformers: Revenge of the Fallen (2009)
+Mission: Impossible - Ghost Protocol (2011)
+The Dark Knight Rises (2012)
+Star Trek Into Darkness (2013)
+The Hunger Games: Catching Fire (2013)
+Transformers: Age of Extinction (2014)
+Lucy (2014)
+Interstellar (2014)
+Star Wars: The Force Awakens (2015)
+Batman v Superman: Dawn of Justice (2016)
+Dunkirk (2017)
+Star Wars: The Last Jedi (2017)
+First Man (2018)
+Tenet (2020)
+Wonder Woman 1984 (2020)
+No Time to Die (2021)
+Nope (2022)
+Oppenheimer (2023)
+Sinners (2025)
+The Smashing Machine (2025)
+The Odyssey (2026)
+
+# formatted or shot for IMAX digital, with a documented variable-ratio release
+Tron: Legacy (2010)
+Ghostbusters (2016)
+Captain America: Civil War (2016)
+Transformers: The Last Knight (2017)
+Thor: Ragnarok (2017)
+Aquaman (2018)
+Mission: Impossible - Fallout (2018)
+The Aeronauts (2019)
+A Writer's Odyssey (2021)
+Top Gun: Maverick (2022)
+The Wandering Earth II (2022)
+Mission: Impossible - Dead Reckoning Part One (2023)
+Guardians of the Galaxy Vol. 3 (2023)
+Joker: Folie a Deux (2024)
+Joker: Folie à Deux (2024)
+How to Train Your Dragon (2025)
+The Conjuring: Last Rites (2025)
+Mission: Impossible - The Final Reckoning (2025)
+Him (2025)
+Project Hail Mary (2026)
+The Mandalorian and Grogu (2026)
+
+# not IMAX
+The Grand Budapest Hotel (2014)
+The French Dispatch (2021)
+Mommy (2014)
+Freaky Tales (2024)
+Everything Everywhere All at Once (2022)

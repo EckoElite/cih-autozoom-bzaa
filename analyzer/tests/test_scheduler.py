@@ -436,7 +436,7 @@ def test_the_default_runner_passes_the_folder_sampling_interval_to_the_worker(tm
     seen = []
     monkeypatch.setattr(
         "cih_analyzer.scheduler.subprocess_runner",
-        lambda path, timeout, stop, sample_interval=None, progress=None: (
+        lambda path, timeout, stop, sample_interval=None, progress=None, survey_interval=None: (
             seen.append((path, sample_interval)) or RunResult(skip="iso")
         ),
     )
@@ -450,6 +450,27 @@ def test_the_default_runner_passes_the_folder_sampling_interval_to_the_worker(tm
     sched.scan_now()
     sched.run_one()
     assert seen == [(base + "/tv/e.mkv", 8.0)]
+    store.close()
+
+
+@pytest.mark.parametrize(("configured", "expected"), [({}, 8.0), ({"survey_interval_s": 0.0}, 0.0)])
+def test_the_default_runner_passes_the_survey_interval_to_the_worker(
+    tmp_path, monkeypatch, configured, expected
+):
+    seen = []
+    monkeypatch.setattr(
+        "cih_analyzer.scheduler.subprocess_runner",
+        lambda path, timeout, stop, sample_interval=None, progress=None, survey_interval=None: (
+            seen.append(survey_interval) or RunResult(skip="iso")
+        ),
+    )
+    store = Store(tmp_path / "s.sqlite")
+    (tmp_path / "e.mkv").write_bytes(b"x")
+    base = str(tmp_path).replace("\\", "/")
+    sched = Scheduler(Settings(config_dir=tmp_path, media_roots=(base,), **configured), store, PathMap())
+    sched.scan_now()
+    sched.run_one()
+    assert seen == [expected]
     store.close()
 
 

@@ -101,6 +101,7 @@ def subprocess_runner(
     stop: threading.Event,
     sample_interval: float | None = None,
     progress: Callable[[dict], None] | None = None,
+    survey_interval: float | None = None,
 ) -> RunResult:
     """Analyse one file in a child process and parse the envelope it prints. `progress` is called about once a
     second with the worker's `{"phase", "fraction"}` while it runs."""
@@ -112,6 +113,8 @@ def subprocess_runner(
     log.debug("worker command prefix: %s", _low_priority_prefix() or "(normal priority)")
     if sample_interval is not None:
         cmd += ["--sample-interval", f"{sample_interval:g}"]
+    if survey_interval:
+        cmd += ["--survey-interval", f"{survey_interval:g}"]
     with tempfile.TemporaryDirectory(prefix="cih-job-") as scratch:
         progress_file = Path(scratch, "progress.json")
         if progress is not None:
@@ -192,6 +195,7 @@ class Scheduler:
                 timeout,
                 stop,
                 sample_interval=settings.interval_for(path),
+                survey_interval=settings.survey_interval_s,
                 progress=lambda latest: self._set_progress(path, latest),
             )
         )

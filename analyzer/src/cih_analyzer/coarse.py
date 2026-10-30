@@ -46,6 +46,8 @@ class Sample:
     skew: int = (
         0  # how lopsided the crop was before it was centred: the larger margin minus the smaller, in pixels
     )
+    skew_x: int | None = None  # the same, across the width and the height alone (None: only `skew` is known)
+    skew_y: int | None = None
 
 
 def bit_depth(pix_fmt: str | None) -> int:
@@ -101,7 +103,7 @@ def parse_metadata(text: str, info: VideoInfo, scale_width: int = SCALE_WIDTH) -
             # one edge cannot be mistaken for a matte (the rectangle only ever grows; see frames.measure_edges)
             margin_x = max(0, min(x, info.width - (x + w)))
             margin_y = max(0, min(y, info.height - (y + h)))
-            skew = max(abs(x - (info.width - (x + w))), abs(y - (info.height - (y + h))))
+            skew_x, skew_y = abs(x - (info.width - (x + w))), abs(y - (info.height - (y + h)))
             samples.append(
                 Sample(
                     t=current["t"] - info.start_time,
@@ -110,7 +112,9 @@ def parse_metadata(text: str, info: VideoInfo, scale_width: int = SCALE_WIDTH) -
                     w=info.width - 2 * margin_x,
                     h=info.height - 2 * margin_y,
                     yavg=current["yavg"] / scale,
-                    skew=skew,
+                    skew=max(skew_x, skew_y),
+                    skew_x=skew_x,
+                    skew_y=skew_y,
                 )
             )
         current.clear()

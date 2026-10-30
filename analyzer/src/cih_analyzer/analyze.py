@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import __version__
 from .coarse import coarse_scan, limit_for
 from .fingerprint import quick_hash
-from .probe import VideoInfo
+from .known import is_known_variable
+from .probe import ProbeError, VideoInfo
 from .refine import RefineParams, RefineResult, refine
 from .schema import (
     Active,
@@ -31,10 +32,12 @@ from .schema import (
     Timeline,
     Video,
 )
-from .segmentation import SegmentationParams, segment_samples
+from .segmentation import CoarseResult, SegmentationParams, segment_samples
 from .skip import SkipConfig, inspect_file
+from .survey import judge, survey_scan, worth_surveying
 
 STAGE_SHARE = 0.5  # of the progress bar, the first pass takes this much and the checking of changes the rest
+SURVEY_SHARE = 0.4  # of the whole bar, when a survey is made first
 
 
 @dataclass(frozen=True)
@@ -173,10 +176,15 @@ def analyze_file(
     refine_params: RefineParams | None = None,
     threads: int | None = None,
     sample_interval_s: float | None = None,
+    survey_interval_s: float | None = None,
+    known_variable_file: str = "",
     progress: Callable[[str, float], None] | None = None,
 ) -> Analysis:
     """Analyze one file. Skipped files (ISO, 3D, extras, audio-only, broken) come back with a reason, not an error;
-    anything else that goes wrong while decoding raises `ProbeError`."""
+    anything else that goes wrong while decoding raises `ProbeError`.
+
+    With `survey_interval_s` the file is first surveyed (one keyframe every that many seconds, found by seeking);
+    a file that shows one picture throughout skips the detailed pass that reads every keyframe."""
     path = os.fspath(path)
     inspected = inspect_file(path, skip_config or SkipConfig())
     if inspected.info is None:
@@ -184,18 +192,43 @@ def analyze_file(
     info = inspected.info
     seg_params = seg_params or SegmentationParams()
     scan_args = {} if sample_interval_s is None else {"min_interval_s": sample_interval_s}
+    known = survey_interval_s is not None and is_known_variable(path, known_variable_file)
+    surveying = survey_interval_s is not None and not known and worth_surveying(info, survey_interval_s)
 
-    def stage(phase: str, base: float) -> Callable[[float], None] | None:
-        """Report `phase` as part of the whole: reading the file is the first half, checking the changes the second
-        (an estimate; which half takes longer depends on the film)."""
+    def stage(phase: str, base: float, span: float) -> Callable[[float], None] | None:
+        """Report `phase` as part of the whole bar (an estimate; which part takes longer depends on the film)."""
         if progress is None:
             return None
-        return lambda share: progress(phase, base + STAGE_SHARE * min(1.0, max(0.0, share)))
+        return lambda share: progress(phase, base + span * min(1.0, max(0.0, share)))
 
-    samples = coarse_scan(path, info, threads=threads, progress=stage("reading", 0.0), **scan_args)
-    coarse = segment_samples(samples, info, seg_params)
-    result = refine(
-        path, info, coarse, refine_params or RefineParams(), progress=stage("checking", STAGE_SHARE)
-    )
+    verdict = None
+    if surveying:
+        try:
+            verdict = judge(
+                survey_scan(
+                    path, info, interval=survey_interval_s, progress=stage("surveying", 0.0, SURVEY_SHARE)
+                ),
+                info,
+                seg_params,
+                survey_interval_s,
+            )
+        except ProbeError:
+            verdict = (
+                None  # an unreadable survey decides nothing; the detailed pass either copes or reports it
+            )
+    if verdict is not None and verdict.constant:
+        coarse = CoarseResult((verdict.segment,), (), ("surveyed",), {"survey": verdict.usable})
+        checking = stage("checking", SURVEY_SHARE, 1.0 - SURVEY_SHARE)
+    else:
+        start = SURVEY_SHARE if surveying else 0.0
+        read_share = (1.0 - start) * STAGE_SHARE
+        samples = coarse_scan(
+            path, info, threads=threads, progress=stage("reading", start, read_share), **scan_args
+        )
+        coarse = segment_samples(samples, info, seg_params)
+        if known:
+            coarse = replace(coarse, flags=(*coarse.flags, "known_variable"))
+        checking = stage("checking", start + read_share, 1.0 - start - read_share)
+    result = refine(path, info, coarse, refine_params or RefineParams(), progress=checking)
     timeline = build_timeline(path, info, result, seg_params, display_path=display_path, plex=plex)
     return Analysis(timeline, ramp_raw=ramp_raw_of(result))

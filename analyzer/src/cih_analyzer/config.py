@@ -18,6 +18,8 @@ template, never in code. Secrets (the Plex token, the API key) are kept out of `
 | `PLEX_INTERVAL` | seconds between Plex syncs (default 900) |
 | `RECENT_DAYS` | titles added to Plex this recently are analysed first (default 14) |
 | `SAMPLE_INTERVAL` | seconds between the keyframes the first pass looks at (default 1; larger is faster, and can miss a short change) |
+| `SURVEY_INTERVAL` | seconds between the places a first, cheap survey looks at (default 8; 0 turns it off). A file that shows one picture throughout is finished by the survey; any other gets the detailed pass over every keyframe. A change shorter than this that falls between two places, in a file that never changes otherwise, is missed |
+| `KNOWN_VARIABLE_FILE` | a text file (one `Title (Year)` per line) of extra titles that change ratio; they skip the survey and get the detailed pass, like the titles bundled with the analyzer |
 | `SAMPLE_INTERVALS` | per-folder overrides, `prefix=seconds;prefix=seconds` (for example `/media/tv=8`), longest prefix wins |
 | `LOG_LEVEL` | default `INFO` |
 """
@@ -33,6 +35,7 @@ from pathlib import Path
 
 _FALSE = {"0", "false", "no", "off", ""}
 MIN_SAMPLE_INTERVAL = 1.0  # the first pass never samples more often than the coarse pass's own minimum
+MIN_SURVEY_INTERVAL = 2.0
 
 
 class ConfigError(ValueError):
@@ -78,6 +81,16 @@ def _number(env: Mapping[str, str], name: str, default: float, minimum: float) -
     return value
 
 
+def _survey_interval(env: Mapping[str, str]) -> float:
+    """Seconds between the places the survey looks at; 0 turns the survey off (every file gets the detailed pass)."""
+    value = _number(env, "SURVEY_INTERVAL", 8.0, 0)
+    if 0 < value < MIN_SURVEY_INTERVAL:
+        raise ConfigError(
+            f"SURVEY_INTERVAL must be 0 (off) or at least {MIN_SURVEY_INTERVAL:g}, got {value:g}"
+        )
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     config_dir: Path = Path("/config")
@@ -99,6 +112,7 @@ class Settings:
     analysis_timeout_s: float = 6 * 3600.0
     sample_interval_s: float = 1.0
     sample_intervals: tuple[tuple[str, float], ...] = ()
+    survey_interval_s: float = 8.0
 
     def interval_for(self, path: str) -> float:
         """Seconds between sampled keyframes for a file: the longest folder override that contains it, else the
@@ -162,4 +176,5 @@ class Settings:
             log_level=(env.get("LOG_LEVEL") or "INFO").strip().upper(),
             sample_interval_s=_number(env, "SAMPLE_INTERVAL", 1.0, MIN_SAMPLE_INTERVAL),
             sample_intervals=tuple(intervals),
+            survey_interval_s=_survey_interval(env),
         )

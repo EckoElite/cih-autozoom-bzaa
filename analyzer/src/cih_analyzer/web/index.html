@@ -191,7 +191,7 @@ function progressBlock(r) {
   track.append(el("div", { className: "fill", style: "width:" + pct + "%" }));
   const left = p.fraction >= 0.03 && elapsed > 60 ? " · about " + minutes(elapsed * (1 - p.fraction) / p.fraction) + " left" : "";
   return el("div", {}, track, el("div", { className: "ptext muted" },
-    span((p.phase === "reading" ? "Reading the file" : "Checking changes") + " · " + pct + "%"),
+    span(({ surveying: "Surveying", reading: "Reading the file" }[p.phase] || "Checking changes") + " · " + pct + "%"),
     span(minutes(elapsed) + " so far" + left)));
 }
 
