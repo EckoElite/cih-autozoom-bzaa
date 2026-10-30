@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Binds the Yellow colour key to the CIH Auto-Zoom override (spec R11): each press moves the playing title along
+  automatic -> off -> 1.33 -> 1.78 -> 1.85 -> 2.00 -> 2.35 -> 2.39 -> automatic, kept for that title.
+  Install: copy to userdata/keymaps/ on the Shield, then reload keymaps (or restart Kodi).
+  Bound globally because PM4K's playback windows take their keys from the global map (a binding on FullscreenVideo
+  was ignored; the 0 key is also used by Kodi for "seek to a typed time" and by PM4K's PIN pad). The script does
+  nothing when no video is playing.
+-->
+<keymap>
+  <global>
+    <keyboard>
+      <yellow>RunScript(service.cih.zoom)</yellow>
+    </keyboard>
+  </global>
+</keymap>
