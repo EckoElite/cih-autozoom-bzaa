@@ -245,7 +245,9 @@ def test_the_worker_count_changes_while_running_and_never_interrupts_a_job(tmp_p
         assert wait_for(lambda: store.counts() == {"done": 6})
         # the three jobs that were running finished; every job after them ran on the one worker that was kept
         assert started[3:] == ["worker-0"] * 3
-        assert wait_for(lambda: len(sched._workers) == 1)
+        assert wait_for(
+            lambda: len([k for k in sched._workers if k >= 0]) == 1
+        )  # the express worker keeps its own slot
     finally:
         gate.set()
         sched.stop(5)

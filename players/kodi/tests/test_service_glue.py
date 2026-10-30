@@ -18,9 +18,10 @@ RPC_CALLS = []
 SETTINGS = {}
 DEFAULT_SETTINGS = {"enabled": True, "lead_ms": 100, "edge_bias": "centered", "band_top": 263, "band_bottom": 1897,
                     "scope_fill": False, "request_analysis": True, "poll_s": 0, "analyzer_url": "http://analyzer",
-                    "api_key": ""}
+                    "api_key": "", "open_at_start": True, "start_addon": "script.plexmod"}
 INFO = {"Player.Process(videowidth)": "3,840", "Player.Process(videoheight)": "2,160", "Player.Process(videodar)": "1.78"}
 CONDITIONS = {}
+BUILTINS = []
 
 
 def install_stubs():
@@ -29,6 +30,7 @@ def install_stubs():
     xbmc.log = lambda msg, level=1: None
     xbmc.getInfoLabel = lambda label: INFO.get(label, "")
     xbmc.getCondVisibility = lambda cond: CONDITIONS.get(cond, False)
+    xbmc.executebuiltin = lambda command: BUILTINS.append(command)
 
     def execute(body):
         RPC_CALLS.append((time.perf_counter(), json.loads(body)))
@@ -118,6 +120,7 @@ class GlueTests(unittest.TestCase):
         SETTINGS.clear()
         SETTINGS.update(DEFAULT_SETTINGS)
         CONDITIONS.clear()
+        BUILTINS.clear()
         self.players = []
         self.client = None
         self._make = service.make_client
@@ -138,6 +141,14 @@ class GlueTests(unittest.TestCase):
 
     def zooms(self):
         return [round(c[1]["params"]["viewmode"]["zoom"], 4) for c in RPC_CALLS]
+
+    @staticmethod
+    def wait_for(condition, seconds=4.0):
+        """The worker starts after about 0.12 s of clock sampling, more on a busy machine: wait, do not guess."""
+        deadline = time.time() + seconds
+        while time.time() < deadline and not condition():
+            time.sleep(0.02)
+        return condition()
 
     def test_play_through_applies_start_zoom_events_and_resets(self):
         self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline()))
@@ -175,13 +186,14 @@ class GlueTests(unittest.TestCase):
         player.onPlayBackStopped()
 
     def test_seek_into_the_second_shot_gets_that_shots_zoom_at_once(self):
-        self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline()))
-        XBMC.Player.t0 = time.perf_counter() - 1.2                    # 1.2 s in: inside the 16:9 shot (1.0 to 1.5 s)
+        self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline(cut_frames=(24, 240))))
+        XBMC.Player.t0 = time.perf_counter() - 1.2                    # 1.2 s in: inside the 16:9 shot (1 to 10 s)
         player = self.new_player()
         player.onAVStarted()
-        time.sleep(0.4)
+        self.assertTrue(self.wait_for(lambda: self.zooms()))
+        first = self.zooms()[0]
         player.onPlayBackStopped()
-        self.assertEqual(self.zooms()[0], 0.7565)
+        self.assertEqual(first, 0.7565)
 
     def test_no_timeline_contains_the_whole_frame_and_keeps_asking_until_it_arrives(self):
         self.client = FakeClient(client_mod.Lookup("missing"), client_mod.Lookup("missing"),
@@ -212,14 +224,14 @@ class GlueTests(unittest.TestCase):
         XBMC.Player.t0 = time.perf_counter()
         player = self.new_player()
         player.onAVStarted()
-        time.sleep(0.3)
+        self.assertTrue(self.wait_for(lambda: self.zooms()))
         self.assertEqual(set(self.zooms()), {1.0})
         tl["override"] = {"mode": "preset", "preset": 1.85}
         self.client = FakeClient(client_mod.Lookup("ok", tl))
         player.reload()                                                # what override.py triggers
-        time.sleep(0.3)
+        found = self.wait_for(lambda: 0.7872 in self.zooms())
         player.onPlayBackStopped()
-        self.assertIn(0.7872, self.zooms())
+        self.assertTrue(found, self.zooms())
 
     def test_disabled_and_unsupported_playbacks_are_left_alone(self):
         self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline()))
@@ -239,20 +251,46 @@ class GlueTests(unittest.TestCase):
         self.assertEqual(self.client.calls, [])
 
     def test_pause_stops_the_schedule_and_resume_picks_it_up_again(self):
-        self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline()))
+        self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline(cut_frames=(24, 240))))
         XBMC.Player.t0 = t0 = time.perf_counter()
         player = self.new_player()
         player.onAVStarted()
-        time.sleep(0.2)
+        self.assertTrue(self.wait_for(lambda: self.zooms()))             # the start zoom is out; now pause
         player.onPlayBackPaused()
         sent_before = len(RPC_CALLS)
         time.sleep(1.0)                                                # the 0.9 s event must not fire while paused
         self.assertEqual(len(RPC_CALLS), sent_before)
-        XBMC.Player.t0 = time.perf_counter() - 1.3                     # resumed later in the film: 16:9 shot
+        XBMC.Player.t0 = time.perf_counter() - 1.3                     # resumed later in the film: the 16:9 shot (1 to 10 s)
         player.onPlayBackResumed()
-        time.sleep(0.4)
+        found = self.wait_for(lambda: 0.7565 in self.zooms()[sent_before:])
         player.onPlayBackStopped()
-        self.assertIn(0.7565, self.zooms()[sent_before:])
+        self.assertTrue(found, self.zooms())
+
+    def test_kodi_opens_pm4k_once_its_home_screen_is_up(self):
+        class Mon:
+            def __init__(self, abort_after=None):
+                self.waits = 0
+
+            def abortRequested(self):
+                return False
+
+            def waitForAbort(self, seconds):
+                self.waits += 1
+                if self.waits == 3:                                   # the home screen appears after a second or so
+                    CONDITIONS["Window.IsActive(home)"] = True
+                return False
+
+        service.open_start_addon(Mon())
+        self.assertEqual(BUILTINS, ["RunScript(script.plexmod)"])
+        BUILTINS.clear()
+        CONDITIONS["Player.HasMedia"] = True                          # something is already playing: leave it
+        service.open_start_addon(Mon())
+        SETTINGS["open_at_start"] = False                             # switched off
+        CONDITIONS.clear()
+        service.open_start_addon(Mon())
+        SETTINGS["open_at_start"], SETTINGS["start_addon"] = True, ""  # nothing named
+        service.open_start_addon(Mon())
+        self.assertEqual(BUILTINS, [])
 
     def test_video_size_labels_with_thousands_separators_are_read(self):
         video = service.playing_video_size()

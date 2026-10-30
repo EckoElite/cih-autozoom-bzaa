@@ -71,6 +71,10 @@ never cuts picture. The add-on keeps asking every `poll_s` (20 s, floor 5) witho
 at the current position when the timeline arrives. This is also the hybrid mode of DD30 for titles not yet analyzed;
 the analyzer's playhead-first partial analysis is not built, so a long film waits for its whole analysis.
 
+## Startup
+
+When the service starts (once per Kodi start), after the home screen is up, it runs `RunScript(<start_addon>)` (default `script.plexmod`) unless something is already playing or `open_at_start` is off. Kodi's `autoexec.py` did not run on this Kodi, and `RunAddon` opens PM4K as a plugin folder and fails.
+
 ## Stop
 
 Stop or end: stop the threads, send zoom 1.0 (Normal), forget the title, so the next file and the menus start clean.

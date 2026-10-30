@@ -118,3 +118,27 @@ msgstr ""
 msgctxt "#30047"
 msgid "For a picture wider than the screen (2.39 or 2.40), fill the band's height and crop a sliver off the sides, instead of fitting it with thin bars."
 msgstr ""
+
+msgctxt "#30050"
+msgid "Startup"
+msgstr ""
+
+msgctxt "#30051"
+msgid "When Kodi starts"
+msgstr ""
+
+msgctxt "#30052"
+msgid "Open an add-on when Kodi starts"
+msgstr ""
+
+msgctxt "#30053"
+msgid "After Kodi shows its home screen, open the add-on below (PM4K), so opening Kodi opens straight into it. Does nothing if something is already playing."
+msgstr ""
+
+msgctxt "#30054"
+msgid "Add-on to open"
+msgstr ""
+
+msgctxt "#30055"
+msgid "The add-on id, for example script.plexmod."
+msgstr ""

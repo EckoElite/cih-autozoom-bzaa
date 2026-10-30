@@ -202,7 +202,13 @@ class ZoomPlayer(xbmc.Player):
 
     def apply_fallback(self):
         """R6: no timeline. Contain the whole frame by its display ratio (never cuts picture)."""
-        video = playing_video_size() or plan_mod.Video(1920, 1080)
+        video = playing_video_size()
+        for _ in range(20):  # the stream's size is not always readable the moment playback starts
+            if video is not None or self.stop_flag.is_set():
+                break
+            time.sleep(0.1)
+            video = playing_video_size()
+        video = video or plan_mod.Video(1920, 1080)  # unreadable: assume 16:9, whose zoom never overhangs the screen
         zoom = plan_mod.full_frame_zoom(video, geometry())
         set_zoom(zoom)
         self.emit({"kind": "fallback", "zoom": zoom, "analyzer": self.lookup.status if self.lookup else None})
@@ -274,6 +280,22 @@ class ZoomPlayer(xbmc.Player):
             log("worker failed: %r" % (exc,), xbmc.LOGERROR)
 
 
+def open_start_addon(monitor):
+    """Open the add-on named in the settings (PM4K) once Kodi has drawn its home screen, so opening Kodi opens PM4K.
+    Runs once per Kodi start, when this service starts; does nothing if something is already playing."""
+    addon_id = ADDON.getSetting("start_addon").strip()
+    if not addon_id or not ADDON.getSettingBool("open_at_start"):
+        return
+    waited = 0.0
+    while not xbmc.getCondVisibility("Window.IsActive(home)") and waited < 30 and not monitor.abortRequested():
+        monitor.waitForAbort(0.5)
+        waited += 0.5
+    if monitor.waitForAbort(2.0) or xbmc.getCondVisibility("Player.HasMedia"):
+        return
+    log("opening %s (home screen after %.1f s)" % (addon_id, waited))
+    xbmc.executebuiltin("RunScript(%s)" % addon_id)  # RunAddon would open PM4K as a (failing) plugin folder
+
+
 def main():
     import xbmcgui
 
@@ -281,6 +303,7 @@ def main():
     player = ZoomPlayer()
     home = xbmcgui.Window(10000)
     log("started")
+    open_start_addon(monitor)
     while not monitor.abortRequested():
         if monitor.waitForAbort(1.0):
             break

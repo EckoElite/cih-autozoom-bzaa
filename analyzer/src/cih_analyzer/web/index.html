@@ -213,8 +213,8 @@ async function refresh() {
     const s = await json("/api/v1/status");
     $("ver").textContent = "v" + s.version + " · up " + minutes(s.uptime_s);
     const c = $("cards"); c.textContent = "";
-    for (const st of ["queued", "running", "done", "error", "skipped", "missing"]) {
-      c.append(el("div", { className: "card" }, el("b", { textContent: String(s.counts[st] || 0), className: st === "error" && s.counts[st] ? "bad" : "" }), st));
+    for (const st of ["queued", "running", "done", "idle", "error", "skipped", "missing"]) {
+      c.append(el("div", { className: "card" }, el("b", { textContent: String(s.counts[st] || 0), className: st === "error" && s.counts[st] ? "bad" : "" }), st === "idle" ? "on demand" : st));
     }
     const sc = s.scheduler;
     const wi = $("workers"); wi.max = s.settings.max_workers;

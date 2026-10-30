@@ -138,32 +138,39 @@ class Store:
         version: str,
         priority: int = PRIORITY_BACKLOG,
         now: float | None = None,
+        on_demand: bool = False,
     ) -> str:
         """Record a file the scanner saw. Returns `new`, `changed` (its timeline is dropped and it is queued again),
-        `reanalyze` (the analyzer's major version moved on), `returned` (it had been missing) or `unchanged`."""
+        `reanalyze` (the analyzer's major version moved on), `returned` (it had been missing) or `unchanged`.
+
+        With `on_demand` (a library analysed only when a player asks for a title) a file is kept `idle` instead of
+        queued, and a new analyzer version does not queue it: it is analysed when asked for."""
         now = time.time() if now is None else now
+        waiting = "idle" if on_demand else "queued"
         with self._lock:
             row = self._one(
                 "SELECT status, size, mtime, analyzer_version, timeline FROM files WHERE path = ?", (path,)
             )
             if row is None:
                 self._run(
-                    "INSERT INTO files(path, size, mtime, status, priority, queued_at) VALUES (?, ?, ?, 'queued', ?, ?)",
+                    f"INSERT INTO files(path, size, mtime, status, priority, queued_at) VALUES (?, ?, ?, '{waiting}', ?, ?)",  # noqa: S608
                     (path, size, mtime, priority, now),
                 )
                 return "new"
             if row["size"] != size or abs(row["mtime"] - mtime) > 1e-3:
                 self._run(
-                    "UPDATE files SET size=?, mtime=?, status='queued', priority=?, queued_at=?, error=NULL, "
+                    f"UPDATE files SET size=?, mtime=?, status='{waiting}', priority=?, queued_at=?, error=NULL, "  # noqa: S608
                     "attempts=0, timeline=NULL, ramp_raw=NULL, quick_hash=NULL, flags=NULL, segments=NULL, "
                     "skip_reason=NULL WHERE path=? AND status != 'running'",
                     (size, mtime, priority, now, path),
                 )
                 return "changed"
             if row["status"] == "missing":
-                status = "done" if row["timeline"] else "queued"
+                status = "done" if row["timeline"] else waiting
                 self._run("UPDATE files SET status=?, queued_at=? WHERE path=?", (status, now, path))
                 return "returned"
+            if on_demand:
+                return "unchanged"
             if row["status"] == "done" and major_of(row["analyzer_version"]) != major_of(version):
                 self._run(
                     "UPDATE files SET status='queued', priority=?, queued_at=?, attempts=0 WHERE path=?",
@@ -209,14 +216,15 @@ class Store:
 
     # ---- jobs --------------------------------------------------------------------------------------------------
 
-    def claim_next(self, now: float | None = None) -> dict[str, Any] | None:
+    def claim_next(self, now: float | None = None, max_priority: int | None = None) -> dict[str, Any] | None:
         """Take the most urgent queued file and mark it running: on-demand first, then recently added, then the
-        backlog newest first."""
+        backlog newest first. With `max_priority`, only files at least that urgent (0: only what a player asked for)."""
         now = time.time() if now is None else now
         with self._lock:
             row = self._one(
-                "SELECT path FROM files WHERE status='queued' ORDER BY priority ASC, "
-                "CASE WHEN priority = 0 THEN queued_at ELSE -mtime END ASC LIMIT 1"
+                "SELECT path FROM files WHERE status='queued' AND priority <= ? ORDER BY priority ASC, "
+                "CASE WHEN priority = 0 THEN queued_at ELSE -mtime END ASC LIMIT 1",
+                (99 if max_priority is None else max_priority,),
             )
             if row is None:
                 return None

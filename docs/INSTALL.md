@@ -93,9 +93,14 @@ name. Paths are case-sensitive.
 **Order.** Start with one small library. Add the next by adding another Read Only path and its `PATH_MAP` rule, then
 **Apply**. The queue keeps what is already done.
 
-**Large libraries (TV).** Before mounting a library with tens of thousands of files, set `SAMPLE_INTERVALS` for it, for
-example `/media/tv=8`: the first pass then looks at a keyframe every 8 seconds instead of every second, which is much
-faster and is enough for episodes that keep one ratio.
+**Large libraries (TV): analysed when played.** Mount the library read-only (for example at `/media/tv`) and set
+`ON_DEMAND_ROOTS` to `/media/tv`. The analyzer then catalogues its files (the status page counts them as "on demand")
+but queues none of them. When you play an episode, the Kodi add-on asks for it by its Plex id; it is analysed at once
+by an express worker (`EXPRESS_WORKERS`, one by default, which keeps working even while analysis is paused), the
+add-on shows the whole frame contained in the screen meanwhile, and switches to the right zoom when the timeline
+arrives. A film or episode that keeps one ratio takes a few minutes (the survey reads a few percent of the file); one that
+changes takes as long as the full pass. Plex ids are matched to files by folder and file name when no `PATH_MAP` rule
+covers the Plex path.
 
 ## 4. Settings
 
@@ -113,6 +118,8 @@ All settings are environment variables; change them by editing the container and
 | `QUIET_HOURS` | | `HH:MM-HH:MM` local time when analysis pauses |
 | `START_PAUSED` | `0` | `1` starts with analysis paused until Resume on the status page; the queue still fills, so chosen files can be put first (search the title, then "Analyze again") before anything runs |
 | `PAUSE_ON_TRANSCODE` | `1` | pause while Plex transcodes video |
+| `ON_DEMAND_ROOTS` | | folders inside `/media` (`;` separated) analysed only when a player asks, for example `/media/tv` |
+| `EXPRESS_WORKERS` | `1` | extra workers that take only titles a player asked for; they run even while analysis is paused by hand |
 | `SURVEY_INTERVAL` | `8` | seconds between the places the quick first survey looks at (at least 2; `0` turns it off). A file that shows one picture throughout is finished by the survey; any other file gets the full pass. A short change that falls between two places, in a film that never changes otherwise, is missed |
 | `KNOWN_VARIABLE_FILE` | | optional text file (for example `/config/known_variable.txt`), one `Title (Year)` per line, of extra films that change ratio; they skip the survey and get the full pass, like the titles bundled with the analyzer |
 | `SAMPLE_INTERVAL` | `1` | seconds between sampled keyframes in the full pass (at least 1) |

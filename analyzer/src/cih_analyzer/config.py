@@ -19,6 +19,8 @@ template, never in code. Secrets (the Plex token, the API key) are kept out of `
 | `RECENT_DAYS` | titles added to Plex this recently are analysed first (default 14) |
 | `SAMPLE_INTERVAL` | seconds between the keyframes the first pass looks at (default 1; larger is faster, and can miss a short change) |
 | `SURVEY_INTERVAL` | seconds between the places a first, cheap survey looks at (default 8; 0 turns it off). A file that shows one picture throughout is finished by the survey; any other gets the detailed pass over every keyframe. A change shorter than this that falls between two places, in a file that never changes otherwise, is missed |
+| `ON_DEMAND_ROOTS` | container paths (among `MEDIA_ROOTS`, separated by `;`, for example `/media/tv`) that are catalogued but analysed only when a player asks for a title in them, instead of being queued in the background. Use it for big libraries such as TV |
+| `EXPRESS_WORKERS` | extra workers (default 1; 0 = none) that take only titles a player asked for, so one does not wait behind the background queue. They run even while analysis is paused by hand, but obey quiet hours and the Plex-transcode pause |
 | `KNOWN_VARIABLE_FILE` | a text file (one `Title (Year)` per line) of extra titles that change ratio; they skip the survey and get the detailed pass, like the titles bundled with the analyzer |
 | `SAMPLE_INTERVALS` | per-folder overrides, `prefix=seconds;prefix=seconds` (for example `/media/tv=8`), longest prefix wins |
 | `LOG_LEVEL` | default `INFO` |
@@ -113,6 +115,8 @@ class Settings:
     sample_interval_s: float = 1.0
     sample_intervals: tuple[tuple[str, float], ...] = ()
     survey_interval_s: float = 8.0
+    on_demand_roots: tuple[str, ...] = ()
+    express_workers: int = 1
 
     def interval_for(self, path: str) -> float:
         """Seconds between sampled keyframes for a file: the longest folder override that contains it, else the
@@ -177,4 +181,6 @@ class Settings:
             sample_interval_s=_number(env, "SAMPLE_INTERVAL", 1.0, MIN_SAMPLE_INTERVAL),
             sample_intervals=tuple(intervals),
             survey_interval_s=_survey_interval(env),
+            on_demand_roots=_split(env.get("ON_DEMAND_ROOTS")),
+            express_workers=int(_number(env, "EXPRESS_WORKERS", 1, 0)),
         )

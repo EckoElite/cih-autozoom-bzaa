@@ -17,7 +17,7 @@
         </setting>
         <setting id="api_key" type="string" label="30022" help="30023">
           <level>0</level>
-          <default></default>
+          <default/>
           <control type="edit" format="string">
             <heading>30022</heading>
             <hidden>true</hidden>
@@ -38,6 +38,22 @@
           </constraints>
           <control type="edit" format="integer">
             <heading>30026</heading>
+          </control>
+        </setting>
+      </group>
+    </category>
+    <category id="startup" label="30050">
+      <group id="1" label="30051">
+        <setting id="open_at_start" type="boolean" label="30052" help="30053">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="start_addon" type="string" label="30054" help="30055">
+          <level>0</level>
+          <default>script.plexmod</default>
+          <control type="edit" format="string">
+            <heading>30054</heading>
           </control>
         </setting>
       </group>

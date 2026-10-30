@@ -37,6 +37,7 @@ from .store import PRIORITY_DEMAND, Store
 log = logging.getLogger(__name__)
 
 IDLE_POLL_S = 5.0
+EXPRESS_POLL_S = 2.0  # an express worker looks for a title a player asked for this often
 PAUSED_POLL_S = 15.0
 TRANSCODE_CACHE_S = 30.0
 MAX_WORKERS = 16
@@ -264,6 +265,13 @@ class Scheduler:
                     thread = threading.Thread(target=self._worker, args=(i,), name=f"worker-{i}", daemon=True)
                     self._workers[i] = thread
                     thread.start()
+            for j in range(self.settings.express_workers):
+                key = -1 - j  # express workers are kept under negative keys
+                thread = self._workers.get(key)
+                if thread is None or not thread.is_alive():
+                    thread = threading.Thread(target=self._express_worker, name=f"express-{j}", daemon=True)
+                    self._workers[key] = thread
+                    thread.start()
 
     def _set_progress(self, path: str, latest: dict) -> None:
         with self._progress_lock:
@@ -321,9 +329,10 @@ class Scheduler:
 
     # ---- the work ------------------------------------------------------------------------------------------------
 
-    def run_one(self) -> bool:
-        """Take and run the most urgent job. Returns False if there was nothing to do."""
-        job = self.store.claim_next(self.clock())
+    def run_one(self, max_priority: int | None = None) -> bool:
+        """Take and run the most urgent job (only one a player asked for, with `max_priority=0`). Returns False if
+        there was nothing to do."""
+        job = self.store.claim_next(self.clock(), max_priority)
         if job is None:
             return False
         path = job["path"]
@@ -399,6 +408,22 @@ class Scheduler:
             if not worked:
                 self.stop_event.wait(IDLE_POLL_S)
 
+    def _express_worker(self) -> None:
+        """Takes only titles a player asked for, so one is not kept waiting behind a film that takes hours. It runs
+        while analysis is paused by hand (a pause is about the background queue; someone is waiting to watch this),
+        but still obeys quiet hours and the Plex-transcode pause."""
+        while not self.stop_event.is_set():
+            if self.paused_reason() not in (None, "paused"):
+                self.stop_event.wait(PAUSED_POLL_S)
+                continue
+            try:
+                worked = self.run_one(max_priority=PRIORITY_DEMAND)
+            except Exception:  # noqa: BLE001
+                log.exception("express worker error")
+                worked = False
+            if not worked:
+                self.stop_event.wait(EXPRESS_POLL_S)
+
     # ---- discovery -----------------------------------------------------------------------------------------------
 
     def scan_now(self) -> ScanSummary:
@@ -409,6 +434,7 @@ class Scheduler:
                 __version__,
                 should_stop=self.stop_event.is_set,
                 now=self.clock(),
+                on_demand_roots=self.settings.on_demand_roots,
             )
         self.last_scan = {"at": self.clock(), **summary.__dict__}
         log.info(
@@ -503,6 +529,7 @@ class Scheduler:
             "paused": self.paused_reason(),
             "workers": self._target,
             "workers_env": self.settings.concurrency,
+            "express": self.settings.express_workers,
             "busy": len(running),
             "running": running,
             "last_scan": self.last_scan,

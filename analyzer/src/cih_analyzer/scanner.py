@@ -41,11 +41,16 @@ def scan_media(
     skip_config: SkipConfig | None = None,
     should_stop: Callable[[], bool] = lambda: False,
     now: float | None = None,
+    on_demand_roots: tuple[str, ...] = (),
 ) -> ScanSummary:
     """Walk every root once and update the store. Files that vanished are marked `missing`, but only for a root
-    that was walked completely (an unreachable share must not make a whole library look deleted)."""
+    that was walked completely (an unreachable share must not make a whole library look deleted). Files under an
+    on-demand root are recorded as `idle` and analysed only when a player asks for them."""
     config = skip_config or SkipConfig()
     summary = ScanSummary()
+    on_demand = tuple(
+        r.replace("\\", "/").rstrip("/") + "/" for r in on_demand_roots
+    )  # folders, wherever the roots start
     for root in roots:
         problems: list[object] = []  # strings, and the OSErrors os.walk reports
         if not os.path.isdir(root):
@@ -76,8 +81,9 @@ def scan_media(
                     summary.skipped += 1
                     continue
                 outcome = store.seen(
-                    path, stat.st_size, stat.st_mtime, version=version, priority=PRIORITY_BACKLOG, now=now
-                )
+                    path, stat.st_size, stat.st_mtime, version=version, priority=PRIORITY_BACKLOG, now=now,
+                    on_demand=path.startswith(on_demand),
+                )  # fmt: skip
                 if outcome != "unchanged":
                     setattr(summary, outcome, getattr(summary, outcome) + 1)
         if problems:
