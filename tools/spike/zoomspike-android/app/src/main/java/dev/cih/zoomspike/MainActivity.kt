@@ -39,6 +39,7 @@ import kotlin.math.roundToInt
  *   C   a SurfaceControl transaction on our own child layer of the SurfaceView
  *
  * Started from the PC:  am start -S -n dev.cih.zoomspike/.MainActivity --es mode C --es clip clip_4k_hdr10.mkv --ei lead 0
+ * (optional: --es fixed 3840x2160 sets the surface buffer size of A2 and B instead of the video's own)
  * The clip and timeline_<clip>.json go in /sdcard/Android/data/dev.cih.zoomspike/files/. Results are written there
  * as run_<mode>_<clip>_lead<lead>_<time>.csv and summarised in logcat under the tag ZoomSpike.
  */
@@ -66,8 +67,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         setContentView(root)
         val mode = intent.getStringExtra("mode") ?: "N"
         if (mode == "A2" || mode == "B") {
-            val info = readTimeline(clip)
-            surfaceView.holder.setFixedSize(info.width, info.height)
+            // "fixed" (e.g. 3840x2160) overrides the surface buffer size: tests a size that is not the video's own
+            val over = intent.getStringExtra("fixed")?.split("x")
+            if (over != null && over.size == 2) {
+                surfaceView.holder.setFixedSize(over[0].toInt(), over[1].toInt())
+            } else {
+                val info = readTimeline(clip)
+                surfaceView.holder.setFixedSize(info.width, info.height)
+            }
         }
         surfaceView.holder.addCallback(this)
     }

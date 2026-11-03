@@ -1,6 +1,6 @@
 """Drive the zoom spike app on the Shield from the PC (read docs/ZOOM_SPIKE_REPORT.md first).
 
-usage: python run_spike.py <out dir> <mode:clip:lead> [<mode:clip:lead> ...]
+usage: python run_spike.py <out dir> <mode:clip:lead[:WxH]> [...]   (WxH sets the surface buffer size of A2 and B)
   e.g. python run_spike.py out A:clip_4k_hdr10.mkv:0 C:clip_4k_hdr10.mkv:0 C:clip_4k_hdr10.mkv:1
 
 For each run: clears logcat, starts the app (am start -S), waits for the app to report the finished run, pulls its CSV
@@ -47,18 +47,20 @@ def adb(*args: str, timeout: int = 60) -> str:
 
 
 def layer_names() -> list[str]:
-    return [n.strip() for n in adb("shell", "dumpsys", "SurfaceFlinger", "--list").splitlines() if PKG in n or "zoomspike" in n]
+    names = [n.strip() for n in adb("shell", "dumpsys SurfaceFlinger --list").splitlines()]
+    return [n for n in names if ("zoomspike" in n) and (n.startswith(("SurfaceView - ", "zoomspike-video")))]
 
 
-def one_run(out: Path, mode: str, clip: str, lead: int) -> None:
-    tag = f"{mode}_{clip.rsplit('.', 1)[0]}_lead{lead}"
+def one_run(out: Path, mode: str, clip: str, lead: int, fixed: str = "") -> None:
+    tag = f"{mode}_{clip.rsplit('.', 1)[0]}_lead{lead}" + (f"_fixed{fixed}" if fixed else "")
     adb("shell", "am", "force-stop", PKG)
     adb("logcat", "-c")
     log = out / f"logcat_{tag}.txt"
     cap = subprocess.Popen([ADB, "-s", DEV, "logcat", "-v", "threadtime"], stdout=log.open("w", encoding="utf-8"))  # noqa: S603
     try:
+        extra = ["--es", "fixed", fixed] if fixed else []
         adb("shell", "am", "start", "-S", "-n", f"{PKG}/.MainActivity", "--es", "mode", mode, "--es", "clip", clip,
-            "--ei", "lead", str(lead))
+            "--ei", "lead", str(lead), *extra)
         began = None
         snapshots = list(SNAPSHOTS)
         deadline = time.time() + 150
@@ -75,8 +77,9 @@ def one_run(out: Path, mode: str, clip: str, lead: int) -> None:
             if began and snapshots and time.time() - began >= snapshots[0][1]:
                 name, _ = snapshots.pop(0)
                 for layer in layer_names():
+                    # one remote command string: the layer names contain spaces
                     (out / f"sf_{tag}_{name}_{re.sub(r'[^A-Za-z0-9]+', '_', layer)[:40]}.txt").write_text(
-                        adb("shell", "dumpsys", "SurfaceFlinger", "--latency", layer), encoding="utf-8")
+                        adb("shell", f"dumpsys SurfaceFlinger --latency '{layer}'"), encoding="utf-8")
         time.sleep(2)
     finally:
         cap.terminate()
@@ -97,5 +100,5 @@ if __name__ == "__main__":
     out_dir.mkdir(parents=True, exist_ok=True)
     subprocess.run([ADB, "connect", DEV], capture_output=True, check=False)  # noqa: S603
     for spec in sys.argv[2:]:
-        m, c, ld = spec.split(":")
-        one_run(out_dir, m, c, int(ld))
+        m, c, ld, *rest = spec.split(":")
+        one_run(out_dir, m, c, int(ld), rest[0] if rest else "")
