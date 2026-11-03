@@ -1,0 +1,132 @@
+name: kodi-android
+
+# Stage 1 of docs/KODI_FORK_PLAN.md: build an UNMODIFIED Kodi 21.2-Omega APK (arm64) under another package name.
+# Runs only on pushes to the spike/kodi-build branch, or by hand.
+on:
+  workflow_dispatch:
+  push:
+    branches: [spike/kodi-build]
+    paths:
+      - '.github/workflows/kodi-android.yml'
+      - 'tools/kodi-build/**'
+
+env:
+  KODI_TAG: 21.2-Omega
+  APP_PACKAGE: org.xbmc.kodi.cih
+  NDK_VERSION: 21.4.7075529
+  ANDROID_TOOLS: /home/runner/android-tools
+  CACHE_VERSION: v1
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 355
+    steps:
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL /usr/local/lib/android /usr/local/.ghcup /usr/share/swift || true
+          sudo apt-get clean
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends autoconf automake bison build-essential ccache cmake curl flex gawk gettext git gperf libcurl4-openssl-dev libtool lib32z1 nasm ninja-build pkg-config python3 swig unzip yasm zip zlib1g-dev libssl-dev autopoint texinfo
+
+      - name: Android SDK and NDK
+        run: |
+          set -e
+          SDK=$ANDROID_TOOLS/android-sdk-linux
+          mkdir -p $SDK/cmdline-tools /tmp/ct
+          curl -sSL -o /tmp/ct.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/ct.zip -d /tmp/ct
+          mv /tmp/ct/cmdline-tools $SDK/cmdline-tools/latest
+          SDKM=$SDK/cmdline-tools/latest/bin/sdkmanager
+          yes | $SDKM --sdk_root=$SDK --licenses > /dev/null || true
+          $SDKM --sdk_root=$SDK platform-tools "platforms;android-34" "build-tools;33.0.1" "ndk;$NDK_VERSION"
+          ls $SDK/ndk
+
+      - name: Debug signing key
+        run: |
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Get Kodi source
+        run: |
+          git clone --depth 1 --branch $KODI_TAG https://github.com/xbmc/xbmc $HOME/kodi
+          cd $HOME/kodi
+          sed -i "s/^APP_PACKAGE .*/APP_PACKAGE $APP_PACKAGE/" version.txt
+          grep -n "APP_PACKAGE\|VERSION_CODE" version.txt
+
+      - name: Restore dependency cache
+        id: depcache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.ANDROID_TOOLS }}/xbmc-depends
+            ${{ env.ANDROID_TOOLS }}/xbmc-tarballs
+          key: kodi-depends-${{ env.KODI_TAG }}-aarch64-${{ env.CACHE_VERSION }}
+
+      - name: Build Kodi dependencies
+        if: steps.depcache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          cd $HOME/kodi/tools/depends
+          ./bootstrap
+          ./configure --with-tarballs=$ANDROID_TOOLS/xbmc-tarballs \
+            --host=aarch64-linux-android \
+            --with-sdk-path=$ANDROID_TOOLS/android-sdk-linux \
+            --with-ndk-path=$ANDROID_TOOLS/android-sdk-linux/ndk/$NDK_VERSION \
+            --prefix=$ANDROID_TOOLS/xbmc-depends
+          make -j$(nproc) 2>&1 | tail -n 400
+          df -h /
+
+      - name: Save dependency cache
+        if: always() && steps.depcache.outputs.cache-hit != 'true' && hashFiles('/home/runner/android-tools/xbmc-depends/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.ANDROID_TOOLS }}/xbmc-depends
+            ${{ env.ANDROID_TOOLS }}/xbmc-tarballs
+          key: kodi-depends-${{ env.KODI_TAG }}-aarch64-${{ env.CACHE_VERSION }}
+
+      - name: Configure Kodi
+        run: |
+          set -e
+          cd $HOME/kodi
+          # the depends step was configured in tools/depends; cmakebuildsys uses its output
+          make -C tools/depends/target/cmakebuildsys BUILD_DIR=$HOME/kodi-build
+
+      - name: Build Kodi
+        run: |
+          set -e
+          cd $HOME/kodi-build
+          make -j$(nproc) 2>&1 | tail -n 300
+          df -h /
+
+      - name: Package APK
+        run: |
+          set -e
+          cd $HOME/kodi-build
+          make apk 2>&1 | tail -n 200
+          find $HOME/kodi-build $HOME/kodi -name '*.apk' -newer $HOME/kodi/version.txt | head
+
+      - name: Collect APK
+        run: |
+          mkdir -p $HOME/out
+          find $HOME/kodi-build $HOME/kodi -name '*.apk' -newer $HOME/kodi/version.txt -exec cp {} $HOME/out/ \;
+          ls -la $HOME/out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kodi-${{ env.KODI_TAG }}-${{ env.APP_PACKAGE }}-apk
+          path: /home/runner/out/*.apk
+          if-no-files-found: error
