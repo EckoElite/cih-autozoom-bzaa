@@ -38,3 +38,19 @@ Counts: mode A was run 3 times on the light clip (1 dirty) and 3 times on the he
 **Other observation (Kodi's real ramp log, 2026-11-03):** during the ramp Kodi also sends a `Player.OnAVChange` notification about every 125 ms, which PM4K's Python monitor receives; not yet examined.
 
 **Next step (not run):** read the `SurfaceFlinger` presentation record of Kodi's own video layer (`SurfaceView - org.xbmc.kodi/...`) during an EEAAO ramp at stride 1, 2 and with no zoom, to see the loss at the compositor and whether it has the shape of the resize or of something else.
+
+## Test 1b: Kodi's own video layer during the EEAAO ramp (2026-11-03) and the cause found in Kodi's source
+
+Capture: `tools/spike/watch_kodi_sf.py` (read-only; `dumpsys SurfaceFlinger --latency` of `SurfaceView - org.xbmc.kodi/...` every 5 s, plus logcat). Playback: EEAAO from the add-on with `ramp_stride` 2; the Shield's display ran at 23.976 Hz (Kodi switched it), so one frame is one refresh. 1,987 buffers merged, none never shown.
+
+| Stretch | Frames | Gaps of 2 frame periods (a frame missed) | Gaps shorter than half a period |
+|---|---|---|---|
+| Zoom held, before the ramp (80 to 112 s) | 768 | 0 | 0 |
+| **Ramp span (5.42 s, 66 zoom changes)** | about 66 missed | **66, every one exactly 2.0 frame periods** | 0 |
+| Zoom held, after the ramp (126 to 140 s) | 337 | 0 | 0 |
+
+Frames shown inside the ramp: 12.2 a second, matching the 240 fps phone clip (stride 2: 12 pictures a second). Logcat in the same session: 66 `XBMCVideoView: Changed` lines in the ramp.
+
+**Cause (Kodi 21 Omega source, `DVDVideoCodecAndroidMediaCodec.cpp`, `CMediaCodecVideoBuffer::RenderUpdate`):** each time the destination rectangle differs from the video view's current rectangle, Kodi calls `setSurfaceRect` (an asynchronous layout change on the UI thread) and, in the same call, releases that frame **without rendering it** (`releaseOutputBuffer(render=false)`), with a code comment saying the view change is asynchronous so the frame is skipped. So Kodi drops exactly one frame by design at every geometry change. This explains: one missed frame per applied zoom change; stride 2 giving 12 pictures a second and stride 4 giving 18; stride 12 giving 22; clean playback when the zoom is held; and why the spike app, which does not skip a frame at a rectangle change, did not reproduce the loss (the earlier suspicion that the layout resize itself costs the frame was wrong, apart from one unexplained dirty run).
+
+**What it means for a fix:** the loss is a deliberate skip in Kodi's native renderer, not an Android limit. A Kodi build that renders the frame instead of skipping it removes the loss. A better version (not needed to remove the loss) would apply the new rectangle in step with the frame, with a `SurfaceControl` transaction (`setGeometry`, API 29), which also shortens the 140 ms delay between the add-on's call and the resize. The spike showed that mode B (that transaction on the SurfaceView's layer) presents frames cleanly with HDR10 clips on this Shield; HDR staying on and the zoom landing on the right frame are still to be confirmed by the user.
