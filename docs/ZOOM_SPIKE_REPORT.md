@@ -24,14 +24,14 @@ Method: the app plays a 60 s clip (hard cuts, an eased ramp, a linear ramp, alte
 | Mode | How | Light 4K HDR10 clip | Heavy 4K HDR10 clip (82 Mbit/s) |
 |---|---|---|---|
 | N | no zoom | clean | 4 skipped frames in 3 windows (my decode loop, not the zoom) |
-| A | layout resize (Kodi's method) | **1 run with hiccups** (34 of 36 odd gaps within 3 refreshes after a zoom change, against 10 to 19% by chance); **3 later runs clean** | 3 runs clean |
+| A | layout resize (Kodi's method) | **1 run with hiccups** (34 of 36 odd gaps within 3 refreshes after a zoom change, against 10 to 19% by chance); **2 later runs clean** | 3 runs clean |
 | A2 | A with the surface fixed to the video size | clean (127 zoom changes) | 2 skipped frames in one window, otherwise clean |
 | B | `setGeometry` on the SurfaceView's own layer | clean | clean |
 | C | `setGeometry` on our own child layer | worse than baseline (about 90 one-refresh gaps in 47 s, one long stall) | not run |
 
-Counts: the 4K light clip A was run 4 times in all (1 dirty), the heavy clip A 3 times (0 dirty); A2, B and C once each on the light clip, A2 and B once on the heavy clip.
+Counts: mode A was run 3 times on the light clip (1 dirty) and 3 times on the heavy clip (0 dirty); A2, B and C once each on the light clip, A2 and B once on the heavy clip.
 
-**What this shows:** a layout resize can cost frames (the one dirty run is tied to the zoom changes), but it did so in only 1 of 7 runs of mode A, so **the app does not reproduce Kodi's loss** (one frame per applied change, steadily, in EEAAO). Kodi's loss therefore comes from something beyond the SurfaceView resize alone. Not shown by this test: that A2 or B would fix Kodi.
+**What this shows:** a layout resize can cost frames (the one dirty run is tied to the zoom changes), but it did so in only 1 of 6 runs of mode A, so **the app does not reproduce Kodi's loss** (one frame per applied change, steadily, in EEAAO). Kodi's loss therefore comes from something beyond the SurfaceView resize alone. Not shown by this test: that A2 or B would fix Kodi.
 
 **Not yet tested:** zoom landing on the right frame (needs the 240 fps film), HDR10 staying on during B and A2 (needs the projector's signal info), Dolby Vision, a surface buffer size other than the video's (override built, not run).
 
