@@ -1,0 +1,14 @@
+--- a/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecAndroidMediaCodec.cpp
++++ b/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecAndroidMediaCodec.cpp
+@@ -223,8 +223,9 @@
+                 "CMediaCodecVideoBuffer::RenderUpdate: Adj  - {:f}+{:f}-{:f}x{:f}", adjRect.x1,
+                 adjRect.y1, adjRect.Width(), adjRect.Height());
+ 
+-      // setVideoViewSurfaceRect is async, so skip rendering this frame
+-      ReleaseOutputBuffer(false, 0);
++      // CIH: the view is resized asynchronously, but skipping the frame costs a picture frame at every zoom
++      // change (one missed frame per change, measured on a Shield). Render the frame at its due time anyway.
++      ReleaseOutputBuffer(true, displayTime);
+     }
+     else
+       ReleaseOutputBuffer(true, displayTime);

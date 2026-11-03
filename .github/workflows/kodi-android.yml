@@ -1,6 +1,7 @@
 name: kodi-android
 
-# Stage 1 of docs/KODI_FORK_PLAN.md: build an UNMODIFIED Kodi 21.2-Omega APK (arm64) under another package name.
+# Stages 1 and 2 of docs/KODI_FORK_PLAN.md: build Kodi 21.2-Omega (arm64) under another package name, with the
+# patches in tools/kodi-build/*.patch applied (none = an unmodified build).
 # Runs only on pushes to the spike/kodi-build branch, or by hand.
 on:
   workflow_dispatch:
@@ -66,6 +67,17 @@ jobs:
           sed -i "s/^APP_PACKAGE .*/APP_PACKAGE $APP_PACKAGE/" version.txt
           grep -n "APP_PACKAGE\|VERSION_CODE" version.txt
 
+      - name: Apply our patches
+        run: |
+          set -e
+          cd $HOME/kodi
+          for p in "$GITHUB_WORKSPACE"/tools/kodi-build/*.patch; do
+            echo "applying $p"
+            git apply --check -p1 "$p"
+            git apply -p1 "$p"
+          done
+          git diff --stat
+
       - name: Restore dependency cache
         id: depcache
         uses: actions/cache/restore@v4
@@ -89,8 +101,15 @@ jobs:
           make -j$(nproc) 2>&1 | tail -n 400
           df -h /
 
+      - name: Check the dependencies were built
+        id: depsbuilt
+        if: always() && steps.depcache.outputs.cache-hit != 'true'
+        run: |
+          if [ -d "$ANDROID_TOOLS/xbmc-depends" ] && [ -n "$(ls -A $ANDROID_TOOLS/xbmc-depends 2>/dev/null)" ]; then echo "built=true" >> $GITHUB_OUTPUT; else echo "built=false" >> $GITHUB_OUTPUT; fi
+          du -sh $ANDROID_TOOLS/xbmc-depends $ANDROID_TOOLS/xbmc-tarballs 2>/dev/null || true
+
       - name: Save dependency cache
-        if: always() && steps.depcache.outputs.cache-hit != 'true' && hashFiles('/home/runner/android-tools/xbmc-depends/**') != ''
+        if: always() && steps.depcache.outputs.cache-hit != 'true' && steps.depsbuilt.outputs.built == 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -127,6 +146,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kodi-${{ env.KODI_TAG }}-${{ env.APP_PACKAGE }}-apk
+          name: kodi-${{ env.KODI_TAG }}-cih-patched-apk
           path: /home/runner/out/*.apk
           if-no-files-found: error
