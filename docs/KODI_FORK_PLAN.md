@@ -77,3 +77,27 @@ Reading: the SurfaceControl path moved the delay by only about 50 ms and trimmed
 Settings changed on the **test Kodi only** (not the daily Kodi): `lead_ms` 266, `edge_bias` `centered` (the user prefers the zoom to aim for the exact frame over the shrink-early bias; the daily Kodi keeps its settings until told otherwise).
 
 What would make it exact (not done; needs the user's decision): apply each frame's rectangle at that frame's display time. `RenderUpdate` already receives the frame's `displayTime`; the Java side could schedule the `SurfaceControl` transaction for just before that time, so the geometry follows the frame instead of the render moment. Landing would then depend only on which frame's render sees the new zoom, which the add-on can aim at much better than a fixed delay. An even more direct form would let the add-on name the frame. Both are changes to Kodi's native renderer and need more builds and filmed runs.
+
+## Frame-locked zoom table (patch 0003) on the Shield (2026-11-04)
+
+Build: CI run 41781145170 (renderer reads `special://temp/cih_zoom.txt` with POSIX open/read; add-on v0.3.0 with ack handshake).
+Test app `org.xbmc.kodi.cih`, `lead_ms` 266 / `edge_bias` centered (unused in table mode), `ramp_stride` 1, 23.976 Hz output, HDR10.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Table loaded, acknowledged, add-on keeps it (no fallback) | Yes | kodi.log: "CIH zoom table loaded: 1060 entries", add-on "zoom table written and taken" |
+| EEAAO ramp 1731.23-1736.61 s | 130 zoom steps, one per video frame (41.0-42.0 ms apart), 0.7865 -> 1.0, monotonic | kodi.log "CIH zoom ... at picture time ..." |
+| User's eyes (EEAAO ramp) | "pretty smooth, best it has been so far" | user, 2026-11-04 |
+| Boundary video, all 216 table entries | applied, none missed; log picture time within +-0.5 ms of each entry's time | kodi.log vs `drive_*.table.txt` |
+| Video layer frame pacing (SurfaceFlinger) | 2221 frames, 0 long gaps, 0 short gaps, mean 41.71 ms | `watch_kodi_sf.py` capture |
+| Cut timing on the wall (240 fps clip IMG_8388, 25 usable cuts) | zoom lands -0.12 content frames from the new picture (mean; sd 0.09; range -0.26 .. +0.08). All 25 within +-0.5 frame | `decode_capture2.py` + `analyze_boundary2.py` |
+| Ramp shape on the wall (eased, linear) | follows the table with an offset of -0.05 content frame; plate-width noise 3.3 / 5.1 px rms (about 1 px per frame step), so per-step smoothness cannot be resolved from plate width | clip IMG_8388 |
+
+For comparison, timed commands (patch 0001 + 0002) gave a mean latency of 0.266 s with 0.74-frame sd.
+Cuts now land on the exact frame within the camera's resolution (0.1 frame), so R2's "<= 1 frame, target 0" is met for cuts.
+
+Not yet verified: Dolby Vision, seek into the middle of a ramp (table lookup is by picture time, so expected to work), the Yellow override key,
+the third (near-black) ramp and cuts 1776/2112 (skipped by the analysis: no width step / no code), per-step ramp smoothness by camera, and the daily Kodi (this is only in the `.cih` test app).
+
+Test notes: the boundary driver's `--table` mode needs `service.cih.zoom` disabled (it withdraws tables it did not write) and writes the table after the
+stop and before the open (stopping the renderer removes it). `decode_capture2.py` geometry constants are per camera position (IMG_8384, IMG_8388 noted in the file).

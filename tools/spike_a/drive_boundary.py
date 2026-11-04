@@ -115,6 +115,46 @@ def detect_pc_ip(shield_ip):
         s.close()
 
 
+TEMP_DIR = "/sdcard/Android/data/org.xbmc.kodi.cih/files/.kodi/temp"  # the patched test Kodi's special://temp
+
+
+def find_adb():
+    hits = list((Path.home() / "AppData/Local/Microsoft/WinGet/Packages").glob("Google.PlatformTools*/platform-tools/adb.exe"))
+    return str(hits[0]) if hits else "adb"
+
+
+def table_entries(timeline, shift_s):
+    """The whole plan as the patched Kodi's per-frame table: [(seconds, zoom)], ascending (see framelock.py)."""
+    fps_num, fps_den = (24000, 1001) if str(timeline["fps"]).startswith("23.9") else (24, 1)
+    by_time = {0.0: 1.0}
+    for cut in timeline["cuts"]:
+        by_time[cut["frame"] * fps_den / fps_num] = cut["zoom_to"]
+    for ramp in timeline["ramps"]:
+        for i, z in enumerate(ramp["zoom"]):
+            by_time[(ramp["start_frame"] + i) * fps_den / fps_num] = z
+    out = []
+    for t in sorted(by_time):
+        if out and abs(out[-1][1] - by_time[t]) < 1e-9:
+            continue
+        out.append((0.0 if not out else t + shift_s, by_time[t]))
+    return out
+
+
+def push_table(entries, serial, tmp, wait=True):
+    """Put the table where the patched Kodi reads it and wait for the renderer's acknowledgement."""
+    import subprocess
+    adb = find_adb()
+    text = f"CIH1 {serial}\n" + "".join(f"{t:.6f} {z:.6f}\n" for t, z in entries)
+    tmp.write_text(text, encoding="utf-8", newline="\n")
+    subprocess.run([adb, "push", str(tmp), f"{TEMP_DIR}/cih_zoom.txt"], capture_output=True, check=True)  # noqa: S603
+    for _ in range(30 if wait else 0):
+        time.sleep(0.2)
+        got = subprocess.run([adb, "shell", f"cat {TEMP_DIR}/cih_ack.txt"], capture_output=True, text=True, check=False).stdout.strip()  # noqa: S603
+        if got == str(serial):
+            return True
+    return False
+
+
 def build_events(timeline, ramp_lead, seed):
     fps_num, fps_den = (24000, 1001) if str(timeline["fps"]).startswith("23.9") else (24, 1)
     ftime = lambda f: f * fps_den / fps_num
@@ -135,10 +175,12 @@ def build_events(timeline, ramp_lead, seed):
     return events, ftime(timeline["frames"])
 
 
-def open_playback(kodi, url, attempts=6):
+def open_playback(kodi, url, attempts=6, before_open=None):
     for a in range(1, attempts + 1):
         kodi.call("Player.Stop", {"playerid": 1})
         time.sleep(4)
+        if before_open:
+            before_open()  # stopping removes the table, so it goes in after the stop and before the open
         kodi.call("Player.Open", {"item": {"file": url}})
         for _ in range(16):
             time.sleep(0.5)
@@ -160,6 +202,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--play-only", action="store_true",
                     help="only start playback (with retries); send no zoom commands, for tests of the in-Kodi add-on")
+    ap.add_argument("--table", action="store_true",
+                    help="frame-locked mode: write the plan as the patched Kodi's per-frame zoom table (paused at the start) "
+                         "and send no zoom commands")
+    ap.add_argument("--shift-ms", type=float, default=0.0, help="with --table: shift every table time by this many ms")
     args = ap.parse_args()
 
     stem = args.file[:-4] if args.file.endswith(".mkv") else args.file
@@ -181,6 +227,24 @@ def main():
 
     print(f"head start {args.predelay:.0f} s: start filming now")
     time.sleep(args.predelay)
+    if args.table:
+        # The in-Kodi add-on must be disabled for this (it withdraws tables it did not write). The table goes in
+        # while nothing plays, so the first frame is already under it.
+        entries = table_entries(timeline, args.shift_ms / 1000.0)
+        serial = int(time.time() * 1000)
+        (OUT / f"drive_{stem}_{stamp}.table.txt").write_text(
+            "".join(f"{t:.6f} {z:.6f}\n" for t, z in entries), encoding="utf-8")
+        ok = open_playback(kodi, url, before_open=lambda: push_table(entries, serial, OUT / "tmp" / "cih_zoom.txt", wait=False))
+        if not ok:
+            print("giving up: playback never started")
+            return
+        kodi.call("Player.SetRepeat", {"playerid": 1, "repeat": "off"})
+        time.sleep(1.0)
+        import subprocess
+        acked = subprocess.run([find_adb(), "shell", f"cat {TEMP_DIR}/cih_ack.txt"], capture_output=True, text=True, check=False).stdout.strip()
+        print(f"table: {len(entries)} entries, shift {args.shift_ms:+.1f} ms, serial {serial}, renderer acknowledged: {acked == str(serial)}")
+        print(f"playing under the table; wall {datetime.now().isoformat(timespec='milliseconds')}")
+        return
     if not open_playback(kodi, url):
         print("giving up: playback never started")
         return

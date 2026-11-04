@@ -17,12 +17,14 @@ import sys
 import numpy as np
 
 # crop window in camera pixels (x, y, w, h)
-CX, CY, CW, CH = 540, 580, 620, 220
+#   IMG_8384: CX, CY = 540, 580;  MARK_L (708, 697);  MARK_R (984, 720);  CENTRE (846.5, 685);  ROW_Y 698
+#   IMG_8388 (below): the camera sat about 44 px further left and 5 px higher
+CX, CY, CW, CH = 494, 575, 620, 220
 # at zoom 1.0 (camera pixels, full frame): the two cyan end markers of the code row, the plate centre
-MARK_L = (708.0, 697.0)
-MARK_R = (984.0, 720.0)
-CENTRE = (846.5, 685.0)
-ROW_Y = 698                      # row band (full frame) used for the plate edges; the code cells stay inside the plate
+MARK_L = (663.0, 691.0)
+MARK_R = (941.0, 715.0)
+CENTRE = (802.5, 679.5)
+ROW_Y = 693                      # row band (full frame) used for the plate edges; the code cells stay inside the plate
 PLATE_W1 = 307.0                 # plate width at zoom 1.0 (camera pixels)
 CELL = 5                         # half-size of the sampling window around a bit centre, scaled with the zoom
 
