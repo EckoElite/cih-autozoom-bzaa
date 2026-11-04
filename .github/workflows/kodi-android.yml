@@ -105,7 +105,7 @@ jobs:
         run: |
           set -e
           cd $HOME/kodi/tools/depends
-          make -j$(nproc) 2>&1 | tail -n 400
+          (set -o pipefail; make -j$(nproc) 2>&1 | tail -n 400)
           df -h /
 
       - name: Check the dependencies were built
@@ -135,14 +135,14 @@ jobs:
         run: |
           set -e
           cd $HOME/kodi-build
-          make -j$(nproc) 2>&1 | tail -n 300
+          (set -o pipefail; make -j$(nproc) 2>&1 | tail -n 300)
           df -h /
 
       - name: Package APK
         run: |
           set -e
           cd $HOME/kodi-build
-          make apk 2>&1 | tail -n 200
+          (set -o pipefail; make apk 2>&1 | tail -n 200)
           find $HOME/kodi-build $HOME/kodi -name '*.apk' -newer $HOME/kodi/version.txt | head
 
       - name: Collect APK
