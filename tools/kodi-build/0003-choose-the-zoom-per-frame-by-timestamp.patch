@@ -1,24 +1,29 @@
 diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
-index b65a669..e51045d 100644
+index b65a669..6ec90eb 100644
 --- a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
 +++ b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
-@@ -12,7 +12,9 @@
+@@ -12,7 +12,10 @@
  #include "../RenderFactory.h"
  #include "../RenderFlags.h"
  #include "DVDCodecs/Video/DVDVideoCodecAndroidMediaCodec.h"
 +#include "filesystem/File.h"
++#include "filesystem/SpecialProtocol.h"
  #include "rendering/RenderSystem.h"
 +#include "settings/DisplaySettings.h"
  #include "settings/MediaSettings.h"
  #include "utils/TimeUtils.h"
  #include "utils/log.h"
-@@ -20,8 +22,150 @@
+@@ -20,8 +23,162 @@
  
  #include "platform/android/activity/XBMCApp.h"
  
 +#include <algorithm>
++#include <cerrno>
  #include <chrono>
 +#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <iterator>
 +#include <mutex>
 +#include <string>
  #include <thread>
@@ -55,6 +60,13 @@ index b65a669..e51045d 100644
 +    return true;
 +  }
 +
++  // For the log: how many entries are loaded and under which serial.
++  std::string State()
++  {
++    std::lock_guard<std::mutex> lock(m_mutex);
++    return std::to_string(m_entries.size()) + " entries, serial '" + m_serial + "'";
++  }
++
 +  // A new playback: forget what was loaded (the file is read again when it is there).
 +  void Forget()
 +  {
@@ -88,23 +100,24 @@ index b65a669..e51045d 100644
 +      m_lastCheck = now;
 +    }
 +
++    // plain POSIX reading of the translated path: Kodi's own file layer did not open the add-on's file
 +    std::string text;
 +    {
-+      XFILE::CFile file;
-+      if (!file.Open(CIH_TABLE_FILE))
++      const std::string path = CSpecialProtocol::TranslatePath(CIH_TABLE_FILE);
++      std::ifstream in(path, std::ios::binary);
++      if (!in)
 +      {
++        const int err = errno;
 +        std::lock_guard<std::mutex> lock(m_mutex);
 +        if (!m_entries.empty() || !m_loggedNoFile)
-+          CLog::Log(LOGINFO, "CIH zoom table: no file to read");
++          CLog::Log(LOGINFO, "CIH zoom table: cannot open {} ({}); Kodi's file layer says it exists: {}", path,
++                    std::strerror(err), XFILE::CFile::Exists(CIH_TABLE_FILE, false));
 +        m_loggedNoFile = true;
 +        m_entries.clear();
 +        m_serial.clear();
 +        return;
 +      }
-+      char buf[8192];
-+      ssize_t n;
-+      while ((n = file.Read(buf, sizeof(buf))) > 0)
-+        text.append(buf, static_cast<size_t>(n));
++      text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 +    }
 +
 +    const size_t eol = text.find('\n');
@@ -163,7 +176,7 @@ index b65a669..e51045d 100644
  
  CRendererMediaCodecSurface::CRendererMediaCodecSurface()
  {
-@@ -31,6 +175,7 @@ CRendererMediaCodecSurface::CRendererMediaCodecSurface()
+@@ -31,6 +188,7 @@ CRendererMediaCodecSurface::CRendererMediaCodecSurface()
  CRendererMediaCodecSurface::~CRendererMediaCodecSurface()
  {
    Reset();
@@ -171,7 +184,7 @@ index b65a669..e51045d 100644
  }
  
  CBaseRenderer* CRendererMediaCodecSurface::Create(CVideoBuffer *buffer)
-@@ -50,6 +195,17 @@ bool CRendererMediaCodecSurface::Configure(const VideoPicture &picture, float fp
+@@ -50,6 +208,17 @@ bool CRendererMediaCodecSurface::Configure(const VideoPicture &picture, float fp
  {
    CLog::Log(LOGINFO, "CRendererMediaCodecSurface::Configure");
  
@@ -189,7 +202,7 @@ index b65a669..e51045d 100644
    m_sourceWidth = picture.iWidth;
    m_sourceHeight = picture.iHeight;
    m_renderOrientation = orientation;
-@@ -97,6 +253,7 @@ void CRendererMediaCodecSurface::AddVideoPicture(const VideoPicture &picture, in
+@@ -97,6 +266,7 @@ void CRendererMediaCodecSurface::AddVideoPicture(const VideoPicture &picture, in
    ReleaseBuffer(index);
  
    BUFFER &buf(m_buffers[index]);
@@ -197,7 +210,7 @@ index b65a669..e51045d 100644
    if (picture.videoBuffer)
    {
      buf.videoBuffer = picture.videoBuffer;
-@@ -113,7 +270,40 @@ void CRendererMediaCodecSurface::ReleaseVideoBuffer(int idx, bool render)
+@@ -113,7 +283,40 @@ void CRendererMediaCodecSurface::ReleaseVideoBuffer(int idx, bool render)
      if (mcvb)
      {
        if (render && m_bConfigured)
@@ -211,8 +224,8 @@ index b65a669..e51045d 100644
 +        const bool ptsOk = buf.pts >= 0.0 && buf.pts < 1.0e15;
 +        const bool found = ptsOk && g_cihZoomTable.Lookup(buf.pts / 1000000.0, tableZoom);
 +        if (m_cihReleases < 4 || m_cihReleases % 600 == 0)
-+          CLog::Log(LOGINFO, "CIH release #{}: picture time {:.4f} s, pts ok {}, table zoom {} ({:.4f})",
-+                    m_cihReleases, buf.pts / 1000000.0, ptsOk, found, tableZoom);
++          CLog::Log(LOGINFO, "CIH release #{}: picture time {:.4f} s, pts ok {}, table zoom {} ({:.4f}); table: {}",
++                    m_cihReleases, buf.pts / 1000000.0, ptsOk, found, tableZoom, g_cihZoomTable.State());
 +        ++m_cihReleases;
 +        if (found)
 +        {

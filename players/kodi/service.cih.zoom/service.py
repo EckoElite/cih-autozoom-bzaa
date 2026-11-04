@@ -364,7 +364,10 @@ class ZoomPlayer(xbmc.Player):
         text = framelock.table_text(table, serial)
         remove_ack()
         write_table(text)
-        if not self.wait_for_ack(serial):
+        taken = self.wait_for_ack(serial)
+        if taken is None:  # stopped while waiting (a seek, the end): a new worker takes over, or nothing is playing
+            return True
+        if not taken:
             delete_table()
             log("the renderer did not take the zoom table; sending timed commands instead", xbmc.LOGWARNING)
             self.emit({"kind": "table_refused", "entries": len(table)})
@@ -378,8 +381,11 @@ class ZoomPlayer(xbmc.Player):
         return True
 
     def wait_for_ack(self, serial):
+        """True when the renderer took the table, False when it did not in time, None when stopped meanwhile."""
         deadline = time.time() + ACK_WAIT_S
-        while time.time() < deadline and not self.stop_flag.is_set():
+        while time.time() < deadline:
+            if self.stop_flag.is_set():
+                return None
             try:
                 with open(ack_file(), encoding="utf-8") as handle:
                     if handle.read().strip() == serial:
@@ -387,7 +393,7 @@ class ZoomPlayer(xbmc.Player):
             except OSError:
                 pass
             time.sleep(0.1)
-        return self.stop_flag.is_set()  # stopped while waiting: nothing to withdraw, nothing to send
+        return None if self.stop_flag.is_set() else False
 
     def work(self):
         if renderer_locks_frames():
