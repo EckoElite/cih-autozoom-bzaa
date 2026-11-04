@@ -150,3 +150,19 @@ msgstr ""
 msgctxt "#30057"
 msgid "During a gradual picture change, send a zoom update every this many frames (1 = every frame). Kodi on Android loses about one picture frame per zoom change. Measured on a 4K Dolby Vision film: 1 = about 18 pictures a second, uneven; 2 = a steady 12 (the default, chosen by the user); 4 = 18; 12 = 22 but the picture edge moves in half-second steps."
 msgstr ""
+
+msgctxt "#30058"
+msgid "Lock zoom changes to their frames"
+msgstr ""
+
+msgctxt "#30059"
+msgid "With the patched Kodi build (it leaves a marker file), hand the whole zoom plan to Kodi as a table and let Kodi pick each frame's zoom by the frame's own timestamp, so every change lands on its exact frame. Has no effect on a stock Kodi, where the add-on keeps sending timed commands (see the lead setting)."
+msgstr ""
+
+msgctxt "#30060"
+msgid "Frame lock shift (ms)"
+msgstr ""
+
+msgctxt "#30061"
+msgid "Moves every table time later (positive) or earlier (negative) by this many milliseconds, for tuning against a slow-motion film. 42 ms is one frame at 24p."
+msgstr ""

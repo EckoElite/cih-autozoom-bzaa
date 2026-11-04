@@ -17,6 +17,7 @@ import xbmcaddon
 import xbmcvfs
 
 import client as client_mod
+import framelock
 import identify
 import plan as plan_mod
 import zoomcore
@@ -36,6 +37,33 @@ def log(msg, level=xbmc.LOGINFO):
 def set_zoom(zoom):
     reply = xbmc.executeJSONRPC(zoomcore.zoom_request(zoom))
     return '"result":"OK"' in reply.replace(" ", "")
+
+
+def table_file():
+    return xbmcvfs.translatePath(framelock.TABLE)
+
+
+def renderer_locks_frames():
+    """True when this Kodi is the patched build that reads the per-frame zoom table (it leaves a marker file)."""
+    return ADDON.getSettingBool("frame_locked") and os.path.exists(xbmcvfs.translatePath(framelock.MARKER))
+
+
+def delete_table():
+    try:
+        os.remove(table_file())
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log("could not remove the zoom table: %r" % (exc,), xbmc.LOGWARNING)
+
+
+def write_table(text):
+    """Atomically: the renderer may read the file at any moment."""
+    path = table_file()
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    os.replace(tmp, path)
 
 
 def geometry():
@@ -214,6 +242,7 @@ class ZoomPlayer(xbmc.Player):
             self.worker = threading.Thread(target=self.work, name="cih-zoom", daemon=True)
             self.worker.start()
             return
+        delete_table()  # a table left from another title must not outlive the fallback
         self.apply_fallback()
         self.start_polling()
 
@@ -228,6 +257,7 @@ class ZoomPlayer(xbmc.Player):
     def end(self):
         self.halt()
         self.ident = self.lookup = self.plan = self.asked = None
+        delete_table()
         set_zoom(1.0)
         if self.logfile:
             self.logfile.close()
@@ -311,7 +341,27 @@ class ZoomPlayer(xbmc.Player):
         self.logfile.write(json.dumps(record) + "\n")
         self.logfile.flush()
 
+    def hold_table(self):
+        """Frame-locked mode: hand the whole plan to the patched Kodi as a per-frame table and keep it in place."""
+        stride = max(1, ADDON.getSettingInt("ramp_stride"))
+        shift_ms = ADDON.getSettingInt("lock_shift_ms")
+        table = framelock.entries(self.plan, stride, shift_ms / 1000.0)
+        text = framelock.table_text(table, "%d" % int(time.time() * 1000))
+        write_table(text)
+        self.emit({"kind": "table", "entries": len(table), "shift_ms": shift_ms, "stride": stride,
+                   "override": self.plan.get("override")})  # fmt: skip
+        log("zoom table written: %d entries" % len(table))
+        while not self.stop_flag.wait(2.0):
+            if not os.path.exists(table_file()):  # the renderer drops it when a playback restarts: put it back
+                write_table(text)
+
     def work(self):
+        if renderer_locks_frames():
+            try:
+                self.hold_table()
+            except Exception as exc:  # noqa: BLE001
+                log("zoom table failed: %r" % (exc,), xbmc.LOGERROR)
+            return
         clock = zoomcore.PlayerClock(self.getTime)
         try:
             # about 0.12 s of sampling to start (the clock keeps being refined while events are pending)
@@ -365,6 +415,7 @@ def main():
     player = ZoomPlayer()
     home = xbmcgui.Window(10000)
     log("started")
+    delete_table()  # one left behind by a Kodi that was stopped mid-film
     open_start_addon(monitor)
     while not monitor.abortRequested():
         if monitor.waitForAbort(1.0):

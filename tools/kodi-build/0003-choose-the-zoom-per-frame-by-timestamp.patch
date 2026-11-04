@@ -1,0 +1,237 @@
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
+index b65a669..5e7a13f 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
+@@ -12,7 +12,9 @@
+ #include "../RenderFactory.h"
+ #include "../RenderFlags.h"
+ #include "DVDCodecs/Video/DVDVideoCodecAndroidMediaCodec.h"
++#include "filesystem/File.h"
+ #include "rendering/RenderSystem.h"
++#include "settings/DisplaySettings.h"
+ #include "settings/MediaSettings.h"
+ #include "utils/TimeUtils.h"
+ #include "utils/log.h"
+@@ -20,8 +22,135 @@
+ 
+ #include "platform/android/activity/XBMCApp.h"
+ 
++#include <algorithm>
+ #include <chrono>
++#include <cstdlib>
++#include <mutex>
++#include <string>
+ #include <thread>
++#include <vector>
++
++namespace
++{
++// CIH: a per-frame zoom table written by the zoom add-on (special://temp/cih_zoom.txt) and looked up by the
++// picture's own timestamp, so a zoom change lands on exactly its frame whatever the timing of the commands.
++//   CIH1 <serial>
++//   <seconds> <zoom>      one line per change, ascending; the zoom holds from that time on
++// Times are the player's (0 is the first frame), as the analyzer's are. The renderer leaves the marker file below
++// when a playback starts, so the add-on knows the table will be read.
++const std::string CIH_TABLE_FILE = "special://temp/cih_zoom.txt";
++const std::string CIH_MARKER_FILE = "special://temp/cih_renderer.txt";
++
++class CCihZoomTable
++{
++public:
++  // The zoom the table gives for a picture at `seconds`, or false when there is no table (or none yet applies).
++  bool Lookup(double seconds, float& zoom)
++  {
++    Refresh();
++    std::lock_guard<std::mutex> lock(m_mutex);
++    if (m_entries.empty())
++      return false;
++    // the last entry at or before this time (half a millisecond of tolerance for rounding in the file)
++    auto it = std::upper_bound(m_entries.begin(), m_entries.end(), seconds + 0.0005,
++                               [](double t, const Entry& e) { return t < e.t; });
++    if (it == m_entries.begin())
++      return false;
++    zoom = (it - 1)->zoom;
++    return true;
++  }
++
++  // A new playback: forget what was loaded (the file is read again when it is there).
++  void Forget()
++  {
++    std::lock_guard<std::mutex> lock(m_mutex);
++    m_entries.clear();
++    m_serial.clear();
++    m_lastCheck = std::chrono::steady_clock::time_point();
++  }
++
++  // The playback is over: nothing may carry over to the next title.
++  void Remove()
++  {
++    Forget();
++    XFILE::CFile::Delete(CIH_TABLE_FILE);
++  }
++
++private:
++  struct Entry
++  {
++    double t;
++    float zoom;
++  };
++
++  void Refresh()
++  {
++    const auto now = std::chrono::steady_clock::now();
++    {
++      std::lock_guard<std::mutex> lock(m_mutex);
++      if (now - m_lastCheck < std::chrono::milliseconds(200))
++        return;
++      m_lastCheck = now;
++    }
++
++    std::string text;
++    {
++      XFILE::CFile file;
++      if (!file.Open(CIH_TABLE_FILE))
++      {
++        std::lock_guard<std::mutex> lock(m_mutex);
++        m_entries.clear();
++        m_serial.clear();
++        return;
++      }
++      char buf[8192];
++      ssize_t n;
++      while ((n = file.Read(buf, sizeof(buf))) > 0)
++        text.append(buf, static_cast<size_t>(n));
++    }
++
++    const size_t eol = text.find('\n');
++    if (eol == std::string::npos || text.compare(0, 5, "CIH1 ") != 0)
++      return;
++    const std::string serial = text.substr(5, eol - 5);
++    {
++      std::lock_guard<std::mutex> lock(m_mutex);
++      if (serial == m_serial)
++        return;
++    }
++
++    std::vector<Entry> entries;
++    const char* p = text.c_str() + eol + 1;
++    while (*p != '\0')
++    {
++      char* end = nullptr;
++      const double t = std::strtod(p, &end);
++      if (end == p)
++        break;
++      p = end;
++      const double z = std::strtod(p, &end);
++      if (end == p)
++        break;
++      p = end;
++      entries.push_back({t, static_cast<float>(z)});
++      while (*p == '\n' || *p == '\r' || *p == ' ')
++        ++p;
++    }
++
++    std::lock_guard<std::mutex> lock(m_mutex);
++    m_entries = std::move(entries);
++    m_serial = serial;
++    CLog::Log(LOGINFO, "CIH zoom table loaded: {} entries, serial {}", m_entries.size(), m_serial);
++  }
++
++  std::mutex m_mutex;
++  std::vector<Entry> m_entries;
++  std::string m_serial;
++  std::chrono::steady_clock::time_point m_lastCheck;
++};
++
++CCihZoomTable g_cihZoomTable;
++} // namespace
+ 
+ CRendererMediaCodecSurface::CRendererMediaCodecSurface()
+ {
+@@ -31,6 +160,7 @@ CRendererMediaCodecSurface::CRendererMediaCodecSurface()
+ CRendererMediaCodecSurface::~CRendererMediaCodecSurface()
+ {
+   Reset();
++  g_cihZoomTable.Remove();
+ }
+ 
+ CBaseRenderer* CRendererMediaCodecSurface::Create(CVideoBuffer *buffer)
+@@ -50,6 +180,18 @@ bool CRendererMediaCodecSurface::Configure(const VideoPicture &picture, float fp
+ {
+   CLog::Log(LOGINFO, "CRendererMediaCodecSurface::Configure");
+ 
++  // CIH: tell the zoom add-on that a per-frame zoom table will be read, and start from a clean table
++  g_cihZoomTable.Forget();
++  {
++    XFILE::CFile marker;
++    if (marker.OpenForWrite(CIH_MARKER_FILE, true))
++    {
++      static const char text[] = "CIH1 zoom table
++";
++      marker.Write(text, sizeof(text) - 1);
++    }
++  }
++
+   m_sourceWidth = picture.iWidth;
+   m_sourceHeight = picture.iHeight;
+   m_renderOrientation = orientation;
+@@ -97,6 +239,7 @@ void CRendererMediaCodecSurface::AddVideoPicture(const VideoPicture &picture, in
+   ReleaseBuffer(index);
+ 
+   BUFFER &buf(m_buffers[index]);
++  buf.pts = picture.pts; // CIH
+   if (picture.videoBuffer)
+   {
+     buf.videoBuffer = picture.videoBuffer;
+@@ -113,7 +256,34 @@ void CRendererMediaCodecSurface::ReleaseVideoBuffer(int idx, bool render)
+     if (mcvb)
+     {
+       if (render && m_bConfigured)
+-        mcvb->RenderUpdate(m_surfDestRect, CXBMCApp::Get().GetNextFrameTime());
++      {
++        // CIH: take the zoom for this exact picture from the per-frame table (by its timestamp) when there is one.
++        // The rectangle Kodi worked out uses the current zoom amount, so it is rescaled about the centre of the
++        // view by (table zoom / current zoom); with no table nothing changes.
++        CRect rect = m_surfDestRect;
++        float tableZoom = 0.0f;
++        if (buf.pts >= 0.0 && buf.pts < 1.0e15 && g_cihZoomTable.Lookup(buf.pts / 1000000.0, tableZoom))
++        {
++          const float current = CDisplaySettings::GetInstance().GetZoomAmount();
++          if (current > 0.01f && tableZoom > 0.01f)
++          {
++            const float ratio = tableZoom / current;
++            const float cx = (m_viewRect.x1 + m_viewRect.x2) * 0.5f;
++            const float cy = (m_viewRect.y1 + m_viewRect.y2) * 0.5f;
++            rect.x1 = cx + (rect.x1 - cx) * ratio;
++            rect.x2 = cx + (rect.x2 - cx) * ratio;
++            rect.y1 = cy + (rect.y1 - cy) * ratio;
++            rect.y2 = cy + (rect.y2 - cy) * ratio;
++            if (tableZoom != m_cihLastZoom)
++            {
++              CLog::Log(LOGINFO, "CIH zoom {:.4f} (Kodi's {:.4f}) at picture time {:.4f} s", tableZoom, current,
++                        buf.pts / 1000000.0);
++              m_cihLastZoom = tableZoom;
++            }
++          }
++        }
++        mcvb->RenderUpdate(rect, CXBMCApp::Get().GetNextFrameTime());
++      }
+       else
+         mcvb->ReleaseOutputBuffer(render, 0);
+     }
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.h b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.h
+index 1a9996b..183571f 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.h
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.h
+@@ -50,9 +50,11 @@ private:
+   bool m_bConfigured = false;
+   CRect m_surfDestRect;
+   int m_lastIndex = -1;
++  float m_cihLastZoom = 0.0f; // CIH: the last zoom taken from the per-frame table (to log changes only)
+ 
+   struct BUFFER
+   {
+     CVideoBuffer *videoBuffer = nullptr;
++    double pts = -1.0; // CIH: the picture's timestamp (DVD_TIME_BASE units), the key for the per-frame zoom table
+   } m_buffers[4];
+ };

@@ -14,11 +14,13 @@ ADDON_DIR = Path(__file__).resolve().parents[1] / "service.cih.zoom"
 sys.path.insert(0, str(ADDON_DIR))
 
 PROFILE = tempfile.mkdtemp(prefix="cih_profile_")
+TEMP = tempfile.mkdtemp(prefix="cih_temp_")
 RPC_CALLS = []
 SETTINGS = {}
 DEFAULT_SETTINGS = {"enabled": True, "lead_ms": 100, "edge_bias": "centered", "band_top": 263, "band_bottom": 1897,
                     "scope_fill": False, "request_analysis": True, "poll_s": 0, "analyzer_url": "http://analyzer",
-                    "api_key": "", "open_at_start": True, "start_addon": "script.plexmod", "ramp_stride": 1}
+                    "api_key": "", "open_at_start": True, "start_addon": "script.plexmod", "ramp_stride": 1,
+                    "frame_locked": True, "lock_shift_ms": 0}
 INFO = {"Player.Process(videowidth)": "3,840", "Player.Process(videoheight)": "2,160", "Player.Process(videodar)": "1.78"}
 CONDITIONS = {}
 WINDOW = {"id": 10000}                                     # the window Kodi is showing (2999 while it starts up)
@@ -84,7 +86,7 @@ def install_stubs():
     xbmcgui.getCurrentWindowId = lambda: WINDOW["id"]
 
     xbmcvfs = types.ModuleType("xbmcvfs")
-    xbmcvfs.translatePath = lambda p: p
+    xbmcvfs.translatePath = lambda p: p.replace("special://temp", TEMP)
     xbmcvfs.mkdirs = lambda p: True
     sys.modules.update({"xbmc": xbmc, "xbmcaddon": xbmcaddon, "xbmcvfs": xbmcvfs, "xbmcgui": xbmcgui})
     return xbmc
@@ -182,6 +184,40 @@ class GlueTests(unittest.TestCase):
         self.assertEqual([r["kind"] for r in log][0], "start")
         self.assertEqual(log[-1]["kind"], "finished")
         self.assertNotIn("SECRET", (Path(PROFILE) / "events.jsonl").read_text())
+
+    def test_frame_locked_mode_writes_a_table_and_sends_no_commands(self):
+        marker = Path(TEMP) / "cih_renderer.txt"
+        table = Path(TEMP) / "cih_zoom.txt"
+        marker.write_text("CIH1 zoom table")
+        try:
+            self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline()))
+            XBMC.Player.t0 = time.perf_counter() - 0.05
+            player = self.new_player()
+            player.onAVStarted()
+            self.assertTrue(self.wait_for(table.exists))
+            lines = table.read_text().splitlines()
+            self.assertTrue(lines[0].startswith("CIH1 "))
+            rows = [tuple(map(float, ln.split())) for ln in lines[1:]]     # start, cut 1 at 1.0 s, cut 2 at 1.5 s
+            self.assertEqual([(t, round(z, 4)) for t, z in rows], [(0.0, 1.0), (1.0, 0.7565), (1.5, 1.0)])
+            time.sleep(0.3)
+            self.assertEqual(self.zooms(), [])                          # Kodi looks the zoom up itself
+            table.unlink()                                              # the renderer dropped it: it comes back
+            service_wait = self.wait_for(table.exists, 4.0)
+            self.assertTrue(service_wait)
+            player.onPlayBackEnded()
+            self.assertFalse(table.exists())                            # and it is removed when the playback ends
+        finally:
+            marker.unlink(missing_ok=True)
+            table.unlink(missing_ok=True)
+
+    def test_without_the_renderer_marker_commands_are_sent_as_before(self):
+        self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline()))
+        XBMC.Player.t0 = time.perf_counter() - 0.05
+        player = self.new_player()
+        player.onAVStarted()
+        self.assertTrue(self.wait_for(lambda: self.zooms()))
+        player.onPlayBackStopped()
+        self.assertFalse((Path(TEMP) / "cih_zoom.txt").exists())
 
     def test_the_title_is_looked_up_by_part_id_and_analysis_is_requested(self):
         self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline()))
