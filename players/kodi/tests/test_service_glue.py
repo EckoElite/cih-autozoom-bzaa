@@ -5,6 +5,7 @@ Real time, a few seconds in all. Catches wiring errors and checks the order and 
 import json
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -185,10 +186,30 @@ class GlueTests(unittest.TestCase):
         self.assertEqual(log[-1]["kind"], "finished")
         self.assertNotIn("SECRET", (Path(PROFILE) / "events.jsonl").read_text())
 
+    @staticmethod
+    def fake_renderer(table, ack, stop):
+        """What the patched Kodi does: when a table appears, read its serial and write it to the ack file."""
+        def run():
+            seen = None
+            while not stop.is_set():
+                if table.exists():
+                    try:
+                        serial = table.read_text().splitlines()[0].split()[1]
+                    except (OSError, IndexError):
+                        serial = None
+                    if serial and serial != seen:
+                        ack.write_text(serial)
+                        seen = serial
+                time.sleep(0.02)
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        return thread
+
     def test_frame_locked_mode_writes_a_table_and_sends_no_commands(self):
-        marker = Path(TEMP) / "cih_renderer.txt"
-        table = Path(TEMP) / "cih_zoom.txt"
+        marker, table, ack = (Path(TEMP) / n for n in ("cih_renderer.txt", "cih_zoom.txt", "cih_ack.txt"))
         marker.write_text("CIH1 zoom table")
+        stop = threading.Event()
+        self.fake_renderer(table, ack, stop)
         try:
             self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline()))
             XBMC.Player.t0 = time.perf_counter() - 0.05
@@ -202,13 +223,31 @@ class GlueTests(unittest.TestCase):
             time.sleep(0.3)
             self.assertEqual(self.zooms(), [])                          # Kodi looks the zoom up itself
             table.unlink()                                              # the renderer dropped it: it comes back
-            service_wait = self.wait_for(table.exists, 4.0)
-            self.assertTrue(service_wait)
+            self.assertTrue(self.wait_for(table.exists, 4.0))
             player.onPlayBackEnded()
             self.assertFalse(table.exists())                            # and it is removed when the playback ends
         finally:
-            marker.unlink(missing_ok=True)
-            table.unlink(missing_ok=True)
+            stop.set()
+            for f in (marker, table, ack):
+                f.unlink(missing_ok=True)
+
+    def test_a_table_the_renderer_does_not_take_is_withdrawn_and_commands_are_sent(self):
+        marker, table, ack = (Path(TEMP) / n for n in ("cih_renderer.txt", "cih_zoom.txt", "cih_ack.txt"))
+        marker.write_text("CIH1 zoom table")                           # a renderer that never acknowledges
+        old_wait = service.ACK_WAIT_S
+        service.ACK_WAIT_S = 0.4
+        try:
+            self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline()))
+            XBMC.Player.t0 = time.perf_counter() - 0.05
+            player = self.new_player()
+            player.onAVStarted()
+            self.assertTrue(self.wait_for(lambda: len(self.zooms()) >= 2, 6.0))
+            self.assertEqual(self.zooms()[:2], [1.0, 0.7565])           # start zoom, then the first cut as a command
+            self.assertFalse(table.exists())                            # the unread table was withdrawn
+        finally:
+            service.ACK_WAIT_S = old_wait
+            for f in (marker, table, ack):
+                f.unlink(missing_ok=True)
 
     def test_without_the_renderer_marker_commands_are_sent_as_before(self):
         self.client = FakeClient(client_mod.Lookup("ok", analyzer_timeline()))

@@ -28,6 +28,7 @@ RELOAD_PROPERTY = "service.cih.zoom.reload"  # set on the home window by overrid
 POLL_FLOOR_S = 5  # the least time between asks while a title has no timeline
 FAST_POLL_S = 2.0  # a title new to the analyzer is asked about this often for its first two minutes
 FAST_POLL_FOR_S = 120.0
+ACK_WAIT_S = 6.0  # how long the patched renderer has to take a zoom table before the add-on sends commands instead
 
 
 def log(msg, level=xbmc.LOGINFO):
@@ -41,6 +42,17 @@ def set_zoom(zoom):
 
 def table_file():
     return xbmcvfs.translatePath(framelock.TABLE)
+
+
+def ack_file():
+    return xbmcvfs.translatePath(framelock.ACK)
+
+
+def remove_ack():
+    try:
+        os.remove(ack_file())
+    except OSError:
+        pass
 
 
 def renderer_locks_frames():
@@ -342,26 +354,51 @@ class ZoomPlayer(xbmc.Player):
         self.logfile.flush()
 
     def hold_table(self):
-        """Frame-locked mode: hand the whole plan to the patched Kodi as a per-frame table and keep it in place."""
+        """Frame-locked mode: hand the whole plan to the patched Kodi as a per-frame table and keep it in place.
+
+        Returns False (the table withdrawn) when the renderer does not acknowledge it, so the caller can send commands."""
         stride = max(1, ADDON.getSettingInt("ramp_stride"))
         shift_ms = ADDON.getSettingInt("lock_shift_ms")
         table = framelock.entries(self.plan, stride, shift_ms / 1000.0)
-        text = framelock.table_text(table, "%d" % int(time.time() * 1000))
+        serial = "%d" % int(time.time() * 1000)
+        text = framelock.table_text(table, serial)
+        remove_ack()
         write_table(text)
+        if not self.wait_for_ack(serial):
+            delete_table()
+            log("the renderer did not take the zoom table; sending timed commands instead", xbmc.LOGWARNING)
+            self.emit({"kind": "table_refused", "entries": len(table)})
+            return False
         self.emit({"kind": "table", "entries": len(table), "shift_ms": shift_ms, "stride": stride,
                    "override": self.plan.get("override")})  # fmt: skip
-        log("zoom table written: %d entries" % len(table))
+        log("zoom table written and taken: %d entries" % len(table))
         while not self.stop_flag.wait(2.0):
             if not os.path.exists(table_file()):  # the renderer drops it when a playback restarts: put it back
                 write_table(text)
+        return True
+
+    def wait_for_ack(self, serial):
+        deadline = time.time() + ACK_WAIT_S
+        while time.time() < deadline and not self.stop_flag.is_set():
+            try:
+                with open(ack_file(), encoding="utf-8") as handle:
+                    if handle.read().strip() == serial:
+                        return True
+            except OSError:
+                pass
+            time.sleep(0.1)
+        return self.stop_flag.is_set()  # stopped while waiting: nothing to withdraw, nothing to send
 
     def work(self):
         if renderer_locks_frames():
             try:
-                self.hold_table()
+                if self.hold_table():
+                    return
             except Exception as exc:  # noqa: BLE001
                 log("zoom table failed: %r" % (exc,), xbmc.LOGERROR)
-            return
+                delete_table()
+            if self.stop_flag.is_set():
+                return
         clock = zoomcore.PlayerClock(self.getTime)
         try:
             # about 0.12 s of sampling to start (the clock keeps being refined while events are pending)

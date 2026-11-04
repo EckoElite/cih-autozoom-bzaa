@@ -10,13 +10,16 @@ this add-on writes: special://temp/cih_zoom.txt.
 
 Times are on the player's clock, as the analyzer's are (0 is the first frame). The patched Kodi writes
 special://temp/cih_renderer.txt when it starts a playback, which is how this add-on knows the table will be read;
-on a stock Kodi the file is absent and the add-on keeps sending commands.
+on a stock Kodi the file is absent and the add-on keeps sending commands. If the renderer does not acknowledge a
+table (special://temp/cih_ack.txt, the table's serial) within a few seconds, the add-on withdraws it and goes back to
+sending commands, so a table that is not being read can never leave a film without its zoom.
 """
 
 import zoomcore
 
 TABLE = "special://temp/cih_zoom.txt"
 MARKER = "special://temp/cih_renderer.txt"
+ACK = "special://temp/cih_ack.txt"   # the renderer writes the table's serial here once it has loaded the table
 
 
 def entries(plan, stride=1, shift_s=0.0):

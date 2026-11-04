@@ -1,5 +1,5 @@
 diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
-index b65a669..f1009ce 100644
+index b65a669..e51045d 100644
 --- a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
 +++ b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
 @@ -12,7 +12,9 @@
@@ -12,7 +12,7 @@ index b65a669..f1009ce 100644
  #include "settings/MediaSettings.h"
  #include "utils/TimeUtils.h"
  #include "utils/log.h"
-@@ -20,8 +22,135 @@
+@@ -20,8 +22,150 @@
  
  #include "platform/android/activity/XBMCApp.h"
  
@@ -34,6 +34,7 @@ index b65a669..f1009ce 100644
 +// when a playback starts, so the add-on knows the table will be read.
 +const std::string CIH_TABLE_FILE = "special://temp/cih_zoom.txt";
 +const std::string CIH_MARKER_FILE = "special://temp/cih_renderer.txt";
++const std::string CIH_ACK_FILE = "special://temp/cih_ack.txt";
 +
 +class CCihZoomTable
 +{
@@ -93,6 +94,9 @@ index b65a669..f1009ce 100644
 +      if (!file.Open(CIH_TABLE_FILE))
 +      {
 +        std::lock_guard<std::mutex> lock(m_mutex);
++        if (!m_entries.empty() || !m_loggedNoFile)
++          CLog::Log(LOGINFO, "CIH zoom table: no file to read");
++        m_loggedNoFile = true;
 +        m_entries.clear();
 +        m_serial.clear();
 +        return;
@@ -105,7 +109,10 @@ index b65a669..f1009ce 100644
 +
 +    const size_t eol = text.find('\n');
 +    if (eol == std::string::npos || text.compare(0, 5, "CIH1 ") != 0)
++    {
++      CLog::Log(LOGINFO, "CIH zoom table: unreadable header ({} bytes read)", text.size());
 +      return;
++    }
 +    const std::string serial = text.substr(5, eol - 5);
 +    {
 +      std::lock_guard<std::mutex> lock(m_mutex);
@@ -131,15 +138,23 @@ index b65a669..f1009ce 100644
 +        ++p;
 +    }
 +
-+    std::lock_guard<std::mutex> lock(m_mutex);
-+    m_entries = std::move(entries);
-+    m_serial = serial;
-+    CLog::Log(LOGINFO, "CIH zoom table loaded: {} entries, serial {}", m_entries.size(), m_serial);
++    {
++      std::lock_guard<std::mutex> lock(m_mutex);
++      m_entries = std::move(entries);
++      m_serial = serial;
++      m_loggedNoFile = false;
++      CLog::Log(LOGINFO, "CIH zoom table loaded: {} entries, serial {}", m_entries.size(), m_serial);
++    }
++    // tell the add-on the table is in use (it falls back to timed commands if this does not arrive)
++    XFILE::CFile ack;
++    if (ack.OpenForWrite(CIH_ACK_FILE, true))
++      ack.Write(serial.c_str(), serial.size());
 +  }
 +
 +  std::mutex m_mutex;
 +  std::vector<Entry> m_entries;
 +  std::string m_serial;
++  bool m_loggedNoFile = false;
 +  std::chrono::steady_clock::time_point m_lastCheck;
 +};
 +
@@ -148,7 +163,7 @@ index b65a669..f1009ce 100644
  
  CRendererMediaCodecSurface::CRendererMediaCodecSurface()
  {
-@@ -31,6 +160,7 @@ CRendererMediaCodecSurface::CRendererMediaCodecSurface()
+@@ -31,6 +175,7 @@ CRendererMediaCodecSurface::CRendererMediaCodecSurface()
  CRendererMediaCodecSurface::~CRendererMediaCodecSurface()
  {
    Reset();
@@ -156,7 +171,7 @@ index b65a669..f1009ce 100644
  }
  
  CBaseRenderer* CRendererMediaCodecSurface::Create(CVideoBuffer *buffer)
-@@ -50,6 +180,17 @@ bool CRendererMediaCodecSurface::Configure(const VideoPicture &picture, float fp
+@@ -50,6 +195,17 @@ bool CRendererMediaCodecSurface::Configure(const VideoPicture &picture, float fp
  {
    CLog::Log(LOGINFO, "CRendererMediaCodecSurface::Configure");
  
@@ -174,7 +189,7 @@ index b65a669..f1009ce 100644
    m_sourceWidth = picture.iWidth;
    m_sourceHeight = picture.iHeight;
    m_renderOrientation = orientation;
-@@ -97,6 +238,7 @@ void CRendererMediaCodecSurface::AddVideoPicture(const VideoPicture &picture, in
+@@ -97,6 +253,7 @@ void CRendererMediaCodecSurface::AddVideoPicture(const VideoPicture &picture, in
    ReleaseBuffer(index);
  
    BUFFER &buf(m_buffers[index]);
@@ -182,7 +197,7 @@ index b65a669..f1009ce 100644
    if (picture.videoBuffer)
    {
      buf.videoBuffer = picture.videoBuffer;
-@@ -113,7 +255,34 @@ void CRendererMediaCodecSurface::ReleaseVideoBuffer(int idx, bool render)
+@@ -113,7 +270,40 @@ void CRendererMediaCodecSurface::ReleaseVideoBuffer(int idx, bool render)
      if (mcvb)
      {
        if (render && m_bConfigured)
@@ -193,7 +208,13 @@ index b65a669..f1009ce 100644
 +        // view by (table zoom / current zoom); with no table nothing changes.
 +        CRect rect = m_surfDestRect;
 +        float tableZoom = 0.0f;
-+        if (buf.pts >= 0.0 && buf.pts < 1.0e15 && g_cihZoomTable.Lookup(buf.pts / 1000000.0, tableZoom))
++        const bool ptsOk = buf.pts >= 0.0 && buf.pts < 1.0e15;
++        const bool found = ptsOk && g_cihZoomTable.Lookup(buf.pts / 1000000.0, tableZoom);
++        if (m_cihReleases < 4 || m_cihReleases % 600 == 0)
++          CLog::Log(LOGINFO, "CIH release #{}: picture time {:.4f} s, pts ok {}, table zoom {} ({:.4f})",
++                    m_cihReleases, buf.pts / 1000000.0, ptsOk, found, tableZoom);
++        ++m_cihReleases;
++        if (found)
 +        {
 +          const float current = CDisplaySettings::GetInstance().GetZoomAmount();
 +          if (current > 0.01f && tableZoom > 0.01f)
@@ -219,13 +240,14 @@ index b65a669..f1009ce 100644
          mcvb->ReleaseOutputBuffer(render, 0);
      }
 diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.h b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.h
-index 1a9996b..183571f 100644
+index 1a9996b..08c7a14 100644
 --- a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.h
 +++ b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.h
-@@ -50,9 +50,11 @@ private:
+@@ -50,9 +50,12 @@ private:
    bool m_bConfigured = false;
    CRect m_surfDestRect;
    int m_lastIndex = -1;
++  int m_cihReleases = 0;      // CIH: pictures released so far (for diagnostics)
 +  float m_cihLastZoom = 0.0f; // CIH: the last zoom taken from the per-frame table (to log changes only)
  
    struct BUFFER
