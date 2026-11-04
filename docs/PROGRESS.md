@@ -275,3 +275,5 @@ The user chose: batch analysis stays for Movies; TV and everything else are anal
 ## Next
 
 Answer the gate items in `docs/AUDIT_1.md`, then Phase 4 (analyzer service). Phase 5's first step is a read-only log of what PM4K passes to Kodi on a real title. The Shield shortcut to PM4K stays a deferred to-do (above).
+
+**0.3.13 (2026-11-04): known-variable titles first.** DD43 in `docs/AUDIT_1.md`. Titles on the known-variable list are queued after on demand and players but ahead of recently added titles and the backlog; the status page shows them as "known variable". Schema version 2 (priorities of existing rows move down one). 370 tests pass, ruff clean. Not deployed: needs a push, a CI image build and a container update.

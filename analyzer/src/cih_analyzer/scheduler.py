@@ -485,11 +485,12 @@ class Scheduler:
                 should_stop=self.stop_event.is_set,
                 now=self.clock(),
                 on_demand_roots=self.settings.on_demand_roots,
+                known_variable_file=self.settings.known_variable_file,
             )
         self.last_scan = {"at": self.clock(), **summary.__dict__}
         log.info(
-            "scan: %d seen, %d new, %d changed, %d missing, %d errors",
-            summary.seen, summary.new, summary.changed, summary.missing, len(summary.errors),
+            "scan: %d seen, %d new, %d changed, %d moved up (known variable), %d missing, %d errors",
+            summary.seen, summary.new, summary.changed, summary.raised, summary.missing, len(summary.errors),
         )  # fmt: skip
         return summary
 

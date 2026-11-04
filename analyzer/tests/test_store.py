@@ -9,6 +9,7 @@ from cih_analyzer.store import (
     PRIORITY_BACKLOG,
     PRIORITY_DEMAND,
     PRIORITY_RECENT,
+    PRIORITY_VARIABLE,
     Store,
     major_of,
 )
@@ -55,6 +56,45 @@ def test_queue_order_demand_then_recent_then_backlog_newest_first(store):
     order = [store.claim_next()["path"] for _ in range(5)]
     assert order == ["/m/asked.mkv", "/m/recent.mkv", "/m/new.mkv", "/m/mid.mkv", "/m/old.mkv"]
     assert store.claim_next() is None
+
+
+def test_known_variable_titles_come_after_demand_and_before_recent_and_backlog(store):
+    add(store, "/m/backlog.mkv", mtime=900)
+    add(store, "/m/recent.mkv", mtime=800, priority=PRIORITY_RECENT)
+    add(store, "/m/var_old.mkv", mtime=10, priority=PRIORITY_VARIABLE)
+    add(store, "/m/var_new.mkv", mtime=20, priority=PRIORITY_VARIABLE)
+    add(store, "/m/asked.mkv", mtime=5)
+    store.requeue("/m/asked.mkv", PRIORITY_DEMAND)
+    order = [store.claim_next()["path"] for _ in range(5)]
+    assert order == ["/m/asked.mkv", "/m/var_new.mkv", "/m/var_old.mkv", "/m/recent.mkv", "/m/backlog.mkv"]
+    assert PRIORITY_DEMAND < PRIORITY_VARIABLE < PRIORITY_RECENT < PRIORITY_BACKLOG
+
+
+def test_a_queued_title_is_moved_up_when_the_scanner_now_gives_it_a_higher_priority_but_never_down(store):
+    add(store, "/m/a.mkv")
+    add(store, "/m/b.mkv", priority=PRIORITY_RECENT)
+    assert add(store, "/m/a.mkv", priority=PRIORITY_VARIABLE) == "raised"
+    assert store.get("/m/a.mkv")["priority"] == PRIORITY_VARIABLE
+    assert add(store, "/m/a.mkv", priority=PRIORITY_VARIABLE) == "unchanged"
+    assert add(store, "/m/a.mkv") == "unchanged"  # the backlog setting does not demote it
+    assert add(store, "/m/b.mkv") == "unchanged" and store.get("/m/b.mkv")["priority"] == PRIORITY_RECENT
+
+
+def test_the_upgrade_makes_room_for_the_new_priority_in_an_old_database(tmp_path):
+    path = tmp_path / "old.sqlite"
+    db = sqlite3.connect(path)
+    db.executescript(MIGRATIONS[0])
+    db.execute("PRAGMA user_version = 1")
+    for name, priority in (("asked", 0), ("recent", 1), ("backlog", 2)):
+        db.execute(
+            "INSERT INTO files(path, status, priority) VALUES (?, 'queued', ?)", (f"/m/{name}.mkv", priority)
+        )
+    db.commit()
+    db.close()
+    upgraded = Store(path)
+    got = {n: upgraded.get(f"/m/{n}.mkv")["priority"] for n in ("asked", "recent", "backlog")}
+    assert got == {"asked": PRIORITY_DEMAND, "recent": PRIORITY_RECENT, "backlog": PRIORITY_BACKLOG}
+    upgraded.close()
 
 
 def test_claiming_marks_running_and_finishing_stores_the_timeline(store):
@@ -213,11 +253,11 @@ def test_existing_data_survives_a_schema_upgrade(tmp_path):
     first.close()
     upgrade = MIGRATIONS + ("ALTER TABLE files ADD COLUMN note TEXT; CREATE INDEX files_note ON files(note)",)
     second = Store(path, upgrade)
-    assert second.schema_version == 2
+    assert second.schema_version == len(upgrade)
     assert second.get("/m/a.mkv")["status"] == "queued" and second.get("/m/a.mkv")["note"] is None
     assert second.get_override("/m/a.mkv")["mode"] == "disable"
     second.close()
-    assert Store(path, upgrade).schema_version == 2  # reopening applies nothing twice
+    assert Store(path, upgrade).schema_version == len(upgrade)  # reopening applies nothing twice
 
 
 def test_a_failed_migration_leaves_the_old_version_intact(tmp_path):
@@ -227,7 +267,7 @@ def test_a_failed_migration_leaves_the_old_version_intact(tmp_path):
     with pytest.raises(sqlite3.OperationalError):
         Store(path, bad)
     check = Store(path)
-    assert check.schema_version == 1
+    assert check.schema_version == len(MIGRATIONS)
     assert "ok" not in {r[1] for r in check._db.execute("PRAGMA table_info(files)")}  # rolled back as a whole
 
 

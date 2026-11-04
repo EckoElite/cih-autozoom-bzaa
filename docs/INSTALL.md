@@ -122,7 +122,7 @@ All settings are environment variables; change them by editing the container and
 | `ON_DEMAND_ROOTS` | | folders inside `/media` (`;` separated) analysed only when a player asks, for example `/media/tv` |
 | `EXPRESS_WORKERS` | `2` | extra workers that take only titles a player is waiting for; they run even while analysis is paused by hand (a re-queue made by hand does not count: it waits for Resume) |
 | `SURVEY_INTERVAL` | `8` | seconds between the places the quick first survey looks at (at least 2; `0` turns it off). A file that shows one picture throughout is finished by the survey; any other file gets the full pass. A short change that falls between two places, in a film that never changes otherwise, is missed |
-| `KNOWN_VARIABLE_FILE` | | optional text file (for example `/config/known_variable.txt`), one `Title (Year)` per line, of extra films that change ratio; they skip the survey and get the full pass, like the titles bundled with the analyzer |
+| `KNOWN_VARIABLE_FILE` | | optional text file (for example `/config/known_variable.txt`), one `Title (Year)` per line, of extra films that change ratio; they skip the survey and get the full pass, like the titles bundled with the analyzer, and are queued ahead of recently added titles and the backlog (behind only titles asked for by hand or by a player) |
 | `SAMPLE_INTERVAL` | `1` | seconds between sampled keyframes in the full pass (at least 1) |
 | `SAMPLE_INTERVALS` | | per-folder overrides, `prefix=seconds;prefix=seconds` |
 | `SCAN_INTERVAL` | `3600` | seconds between scans of the media folders |

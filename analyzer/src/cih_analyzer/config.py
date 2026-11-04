@@ -21,7 +21,7 @@ template, never in code. Secrets (the Plex token, the API key) are kept out of `
 | `SURVEY_INTERVAL` | seconds between the places a first, cheap survey looks at (default 8; 0 turns it off). A file that shows one picture throughout is finished by the survey; any other gets the detailed pass over every keyframe. A change shorter than this that falls between two places, in a file that never changes otherwise, is missed |
 | `ON_DEMAND_ROOTS` | container paths (among `MEDIA_ROOTS`, separated by `;`, for example `/media/tv`) that are catalogued but analysed only when a player asks for a title in them, instead of being queued in the background. Use it for big libraries such as TV |
 | `EXPRESS_WORKERS` | extra workers (default 2; 0 = none) that take only titles a player is waiting for (not a re-queue made by hand), so one does not wait behind the background queue. They run even while analysis is paused by hand, but obey quiet hours and the Plex-transcode pause |
-| `KNOWN_VARIABLE_FILE` | a text file (one `Title (Year)` per line) of extra titles that change ratio; they skip the survey and get the detailed pass, like the titles bundled with the analyzer |
+| `KNOWN_VARIABLE_FILE` | a text file (one `Title (Year)` per line) of extra titles that change ratio; they skip the survey and get the detailed pass, like the titles bundled with the analyzer, and they are queued ahead of recently added titles and the backlog (behind only titles asked for by hand or by a player) |
 | `SAMPLE_INTERVALS` | per-folder overrides, `prefix=seconds;prefix=seconds` (for example `/media/tv=8`), longest prefix wins |
 | `LOG_LEVEL` | default `INFO` |
 """
@@ -117,6 +117,7 @@ class Settings:
     survey_interval_s: float = 8.0
     on_demand_roots: tuple[str, ...] = ()
     express_workers: int = 2
+    known_variable_file: str = ""
 
     def interval_for(self, path: str) -> float:
         """Seconds between sampled keyframes for a file: the longest folder override that contains it, else the
@@ -183,4 +184,5 @@ class Settings:
             survey_interval_s=_survey_interval(env),
             on_demand_roots=_split(env.get("ON_DEMAND_ROOTS")),
             express_workers=int(_number(env, "EXPRESS_WORKERS", 2, 0)),
+            known_variable_file=(env.get("KNOWN_VARIABLE_FILE") or "").strip(),
         )

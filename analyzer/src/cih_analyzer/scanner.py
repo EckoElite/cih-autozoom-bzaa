@@ -13,10 +13,11 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from .known import is_known_variable
 from .pathmap import PathMap
 from .plex import PlexAuthError, PlexClient, PlexError
 from .skip import DISC_IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, SkipConfig, path_skip_reason
-from .store import PRIORITY_BACKLOG, Store
+from .store import PRIORITY_BACKLOG, PRIORITY_VARIABLE, Store
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class ScanSummary:
         0  # queued in the background before their folder was marked on demand, now waiting for a player
     )
     returned: int = 0
+    raised: int = 0  # still waiting, moved up because the title is on the known-variable list
     skipped: int = 0
     missing: int = 0
     errors: list[str] = field(default_factory=list)
@@ -45,10 +47,13 @@ def scan_media(
     should_stop: Callable[[], bool] = lambda: False,
     now: float | None = None,
     on_demand_roots: tuple[str, ...] = (),
+    known_variable_file: str = "",
 ) -> ScanSummary:
     """Walk every root once and update the store. Files that vanished are marked `missing`, but only for a root
     that was walked completely (an unreachable share must not make a whole library look deleted). Files under an
-    on-demand root are recorded as `idle` and analysed only when a player asks for them."""
+    on-demand root are recorded as `idle` and analysed only when a player asks for them. A title on the
+    known-variable list (the bundled one plus `known_variable_file`) is queued ahead of the rest of the backlog and
+    of recently added titles, behind only what was asked for by hand or by a player."""
     config = skip_config or SkipConfig()
     summary = ScanSummary()
     on_demand = tuple(
@@ -83,8 +88,11 @@ def scan_media(
                     store.mark_skipped(path, reason, stat.st_size, stat.st_mtime)
                     summary.skipped += 1
                     continue
+                priority = (
+                    PRIORITY_VARIABLE if is_known_variable(path, known_variable_file) else PRIORITY_BACKLOG
+                )
                 outcome = store.seen(
-                    path, stat.st_size, stat.st_mtime, version=version, priority=PRIORITY_BACKLOG, now=now,
+                    path, stat.st_size, stat.st_mtime, version=version, priority=priority, now=now,
                     on_demand=path.startswith(on_demand),
                 )  # fmt: skip
                 if outcome != "unchanged":

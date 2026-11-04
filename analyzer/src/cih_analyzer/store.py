@@ -19,8 +19,11 @@ from typing import Any
 
 PRIORITY_PLAYER = -1  # a player is waiting for it now: express workers take only these
 PRIORITY_DEMAND = 0  # asked for by hand (a re-queue from the status page or the API)
-PRIORITY_RECENT = 1  # recently added to Plex
-PRIORITY_BACKLOG = 2
+PRIORITY_VARIABLE = (
+    1  # a title on the known-variable-ratio list: ahead of everything the scanner finds by itself
+)
+PRIORITY_RECENT = 2  # recently added to Plex
+PRIORITY_BACKLOG = 3
 
 MIGRATIONS: tuple[str, ...] = (
     """
@@ -60,6 +63,8 @@ MIGRATIONS: tuple[str, ...] = (
     );
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     """,
+    # known-variable titles got their own priority between on demand (0) and recent: recent and backlog move down one
+    "UPDATE files SET priority = priority + 1 WHERE priority >= 1",
 )
 
 _LIST_COLUMNS = (
@@ -143,7 +148,7 @@ class Store:
     ) -> str:
         """Record a file the scanner saw. Returns `new`, `changed` (its timeline is dropped and it is queued again),
         `reanalyze` (the analyzer's major version moved on), `returned` (it had been missing), `idled` (on demand, but it was
-        queued in the background before that was set) or `unchanged`.
+        queued in the background before that was set), `raised` (still waiting, now at a higher priority) or `unchanged`.
 
         With `on_demand` (a library analysed only when a player asks for a title) a file is kept `idle` instead of
         queued, and a new analyzer version does not queue it: it is analysed when asked for."""
@@ -185,6 +190,11 @@ class Store:
                     (priority, now, path),
                 )
                 return "reanalyze"
+            if row["status"] == "queued" and row["priority"] > priority:
+                # a title that is waiting at a lower priority than the scanner now gives it (it was added to the
+                # known-variable list after it was first queued): move it up, never down
+                self._run("UPDATE files SET priority=? WHERE path=?", (priority, path))
+                return "raised"
             return "unchanged"
 
     def restart(self, path: str, size: int, mtime: float, priority: int, now: float | None = None) -> None:
@@ -225,8 +235,8 @@ class Store:
     # ---- jobs --------------------------------------------------------------------------------------------------
 
     def claim_next(self, now: float | None = None, max_priority: int | None = None) -> dict[str, Any] | None:
-        """Take the most urgent queued file and mark it running: on-demand first, then recently added, then the
-        backlog newest first. With `max_priority`, only files at least that urgent (`PRIORITY_PLAYER`: only what a player is waiting for)."""
+        """Take the most urgent queued file and mark it running: on-demand first, then known-variable titles, then
+        recently added, then the backlog (the last three newest first). With `max_priority`, only files at least that urgent (`PRIORITY_PLAYER`: only what a player is waiting for)."""
         now = time.time() if now is None else now
         with self._lock:
             row = self._one(

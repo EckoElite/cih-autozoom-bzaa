@@ -10,7 +10,7 @@ from cih_analyzer.api import create_app
 from cih_analyzer.config import Settings
 from cih_analyzer.pathmap import PathMap
 from cih_analyzer.scheduler import RunResult, Scheduler
-from cih_analyzer.store import PRIORITY_DEMAND, PRIORITY_PLAYER, Store
+from cih_analyzer.store import MIGRATIONS, PRIORITY_DEMAND, PRIORITY_PLAYER, Store
 
 HASH = "b" * 40
 TIMELINE = {
@@ -128,7 +128,7 @@ def test_the_queue_carries_progress_for_running_files_only(api):
 def test_health_and_the_page_are_served(api):
     client, *_ = api
     body = client.get("/health").json()
-    assert body["ok"] is True and body["schema"] == 1
+    assert body["ok"] is True and body["schema"] == len(MIGRATIONS)
     page = client.get("/")
     assert page.status_code == 200 and "CIH Analyzer" in page.text and "textContent" in page.text
 
