@@ -1,5 +1,5 @@
 diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
-index b65a669..6ec90eb 100644
+index b65a669..0cc533f 100644
 --- a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
 +++ b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/RendererMediaCodecSurface.cpp
 @@ -12,7 +12,10 @@
@@ -13,7 +13,7 @@ index b65a669..6ec90eb 100644
  #include "settings/MediaSettings.h"
  #include "utils/TimeUtils.h"
  #include "utils/log.h"
-@@ -20,8 +23,162 @@
+@@ -20,8 +23,167 @@
  
  #include "platform/android/activity/XBMCApp.h"
  
@@ -22,12 +22,13 @@ index b65a669..6ec90eb 100644
  #include <chrono>
 +#include <cstdlib>
 +#include <cstring>
-+#include <fstream>
-+#include <iterator>
 +#include <mutex>
 +#include <string>
  #include <thread>
 +#include <vector>
++
++#include <fcntl.h>
++#include <unistd.h>
 +
 +namespace
 +{
@@ -104,8 +105,8 @@ index b65a669..6ec90eb 100644
 +    std::string text;
 +    {
 +      const std::string path = CSpecialProtocol::TranslatePath(CIH_TABLE_FILE);
-+      std::ifstream in(path, std::ios::binary);
-+      if (!in)
++      const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
++      if (fd < 0)
 +      {
 +        const int err = errno;
 +        std::lock_guard<std::mutex> lock(m_mutex);
@@ -117,7 +118,11 @@ index b65a669..6ec90eb 100644
 +        m_serial.clear();
 +        return;
 +      }
-+      text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
++      char buf[8192];
++      ssize_t n;
++      while ((n = ::read(fd, buf, sizeof(buf))) > 0)
++        text.append(buf, static_cast<size_t>(n));
++      ::close(fd);
 +    }
 +
 +    const size_t eol = text.find('\n');
@@ -176,7 +181,7 @@ index b65a669..6ec90eb 100644
  
  CRendererMediaCodecSurface::CRendererMediaCodecSurface()
  {
-@@ -31,6 +188,7 @@ CRendererMediaCodecSurface::CRendererMediaCodecSurface()
+@@ -31,6 +193,7 @@ CRendererMediaCodecSurface::CRendererMediaCodecSurface()
  CRendererMediaCodecSurface::~CRendererMediaCodecSurface()
  {
    Reset();
@@ -184,7 +189,7 @@ index b65a669..6ec90eb 100644
  }
  
  CBaseRenderer* CRendererMediaCodecSurface::Create(CVideoBuffer *buffer)
-@@ -50,6 +208,17 @@ bool CRendererMediaCodecSurface::Configure(const VideoPicture &picture, float fp
+@@ -50,6 +213,17 @@ bool CRendererMediaCodecSurface::Configure(const VideoPicture &picture, float fp
  {
    CLog::Log(LOGINFO, "CRendererMediaCodecSurface::Configure");
  
@@ -202,7 +207,7 @@ index b65a669..6ec90eb 100644
    m_sourceWidth = picture.iWidth;
    m_sourceHeight = picture.iHeight;
    m_renderOrientation = orientation;
-@@ -97,6 +266,7 @@ void CRendererMediaCodecSurface::AddVideoPicture(const VideoPicture &picture, in
+@@ -97,6 +271,7 @@ void CRendererMediaCodecSurface::AddVideoPicture(const VideoPicture &picture, in
    ReleaseBuffer(index);
  
    BUFFER &buf(m_buffers[index]);
@@ -210,7 +215,7 @@ index b65a669..6ec90eb 100644
    if (picture.videoBuffer)
    {
      buf.videoBuffer = picture.videoBuffer;
-@@ -113,7 +283,40 @@ void CRendererMediaCodecSurface::ReleaseVideoBuffer(int idx, bool render)
+@@ -113,7 +288,40 @@ void CRendererMediaCodecSurface::ReleaseVideoBuffer(int idx, bool render)
      if (mcvb)
      {
        if (render && m_bConfigured)
