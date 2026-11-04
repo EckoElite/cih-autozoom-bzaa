@@ -87,8 +87,9 @@ jobs:
             ${{ env.ANDROID_TOOLS }}/xbmc-tarballs
           key: kodi-depends-${{ env.KODI_TAG }}-aarch64-${{ env.CACHE_VERSION }}
 
-      - name: Build Kodi dependencies
-        if: steps.depcache.outputs.cache-hit != 'true'
+      # bootstrap and configure write the files the later steps need into the source tree (not into the cache),
+      # so they run every time; only the long `make` is skipped when the dependency cache was restored.
+      - name: Configure Kodi dependencies
         run: |
           set -e
           cd $HOME/kodi/tools/depends
@@ -98,6 +99,12 @@ jobs:
             --with-sdk-path=$ANDROID_TOOLS/android-sdk-linux \
             --with-ndk-path=$ANDROID_TOOLS/android-sdk-linux/ndk/$NDK_VERSION \
             --prefix=$ANDROID_TOOLS/xbmc-depends
+
+      - name: Build Kodi dependencies
+        if: steps.depcache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          cd $HOME/kodi/tools/depends
           make -j$(nproc) 2>&1 | tail -n 400
           df -h /
 
