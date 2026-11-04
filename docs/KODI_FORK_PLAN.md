@@ -41,3 +41,19 @@ Build with the stock name `org.xbmc.kodi` and install over your Play Store copy.
 ## What I will not do without asking
 
 Install anything on the Shield, uninstall your Kodi, add secrets to the repo's settings, or merge the spike branch into `main`.
+
+## Results so far (2026-11-03/04)
+
+Test app: `org.xbmc.kodi.cih` beside the Play Store Kodi. Material played: *Everything Everywhere All at Once*, the matte ramp at film frames 41508 to 41642 (135 frames, 5.59 s). Frame delivery is read from `dumpsys SurfaceFlinger --latency` of Kodi's video layer (`tools/spike/watch_kodi_sf.py`); the 240 fps phone clips are the user's.
+
+| Build | `ramp_stride` | Zoom commands sent | Resizes applied by Android | Frames shown in the ramp | Missed frames |
+|---|---|---|---|---|---|
+| Play Store Kodi 21.2 (before) | 2 | 69 | 66 | about 12 pictures a second (every change drops one frame) | about 66 |
+| Patch 0001 (render the frame) | 2 | 69 | 66 | 576 in 23.98 s (whole window), gaps 41.5 to 42.0 ms | 0 |
+| Patch 0001 | 1 | 135 | **89** (the UI thread merged 46) | 575 in 23.94 s, gaps 41.5 to 42.0 ms | 0 |
+| Patches 0001 + 0002 (SurfaceControl) | 1 | 135 | all of them, no layout resizes (logcat: 1 `Changed` line, `placing the picture with SurfaceControl, view 1920x1080`) | 134 in the 5.59 s of the ramp, gaps 41.5 to 41.9 ms; no gap outside 20.8 to 62.5 ms in a 13.6 s window | 0 |
+
+- User verdicts: patch 0001 at stride 1 "looked better" than stride 2, with "some stutter"; patches 0001 + 0002 at stride 1 "looks smoother, not perfect, I would not notice it without paying close attention".
+- The add-on's calls took 0.25 to 3.4 ms and went out at most 4 ms late (patch 0002 run).
+- **Not measured yet:** where the zoom lands against the picture (patch 0002 applies the geometry as soon as the frame is queued, so the add-on's `lead_ms` of 316 ms, tuned to the slow layout path, may now be too early; needs a 240 fps film); HDR10 and Dolby Vision on the projector; seeking into a ramp; the Yellow override key.
+- Build notes: CI signs every build with a new debug key, so an installed test app cannot be updated in place (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`); each new build means uninstall, install, re-copy the data (the copy is scripted, 167 MB). A fixed signing key would avoid that; not set up (it needs a key kept outside the repo). With the dependency cache restored a build takes 14 minutes (61 minutes without).
