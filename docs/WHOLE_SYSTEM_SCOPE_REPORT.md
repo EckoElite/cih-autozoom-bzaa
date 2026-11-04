@@ -160,3 +160,15 @@ and during a playback `dumpsys SurfaceFlinger` (composition type of the video la
    memory or anamorphic path would change the geometry.
 4. Are you happy to let me do the display change over ADB while you watch (the **ask** steps), and to restart the `.cih` Kodi
    afterwards?
+
+## 7. Result of the on-device test (2026-11-04): the SHIELD stretches instead of letterboxing
+
+Run with the user at the screen (they ran the `wm` commands; I read the state). `wm size 3840x1632` + `wm density 480`:
+`dumpsys display` reported the expected `mCurrentLayerStackRect=Rect(0, 0 - 3840, 1632)` and `mCurrentDisplayRect=Rect(0, 264 - 3840, 1896)`,
+but SurfaceFlinger's composition state was `viewport=[0 0 3840 1632] ... frame=[0 0 3840 2160]` and the user saw every app
+**stretched vertically (x1.32) to fill the 16:9 signal**. With `wm scaling off` applied (`display_scaling_force=1`) SurfaceFlinger's frame
+was unchanged. So this firmware's compositor ignores the letterbox rectangle that Android's display manager computes, and `wm size` to a
+different aspect cannot give a real 2.35 letterbox here. `wm overscan` does not exist on Android 11 (not in `wm help`). The assumption in
+section 1 ("feasible, test needed") was wrong for this device. Kodi's own CIH remains the working path; the whole-system idea needs a
+different mechanism (per-app settings, or an external video processor or projector aspect feature). Revert recipe: `wm scaling auto`,
+`wm size 1920x1080`, `wm density reset`.
