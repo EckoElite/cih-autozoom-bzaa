@@ -215,18 +215,10 @@ class Scheduler:
         self._provisional: dict[str, dict] = {}  # what the running survey knows so far, by path
         self._provisional_lock = threading.Lock()
         self._wake = threading.Event()  # an express worker should look for work now
-        self.runner: Runner = runner or (
-            lambda path, timeout, stop: subprocess_runner(
-                path,
-                timeout,
-                stop,
-                sample_interval=settings.interval_for(path),
-                survey_interval=settings.survey_interval_s,
-                progress=lambda latest: self._set_progress(path, latest),
-                start_at=self._start_at.get(path),
-                on_partial=lambda tl: self._set_provisional(path, tl),
-            )
-        )
+        self._job_options: dict[
+            str, dict
+        ] = {}  # how the running job of a path was asked to go (see `_options_of`)
+        self.runner: Runner = runner or self._run_worker_process
         self.plex = (
             plex
             if plex is not None
@@ -245,6 +237,33 @@ class Scheduler:
         self._workers_lock = threading.Lock()
         self._started = False
         self._target = self._initial_workers()
+
+    def _run_worker_process(self, path: str, timeout: float, stop: threading.Event) -> RunResult:
+        """The real runner. A hand re-queue can ask for this one run to skip the survey (`detailed`: every keyframe is
+        read, then every boundary is refined) or to survey at its own interval (`survey_interval`, in seconds)."""
+        options = self._job_options.get(path, {})
+        if options.get("detailed"):
+            survey = None
+        else:
+            survey = options.get("survey_interval") or self.settings.survey_interval_s
+        return subprocess_runner(
+            path,
+            timeout,
+            stop,
+            sample_interval=self.settings.interval_for(path),
+            survey_interval=survey,
+            progress=lambda latest: self._set_progress(path, latest),
+            start_at=self._start_at.get(path),
+            on_partial=lambda tl: self._set_provisional(path, tl),
+        )
+
+    @staticmethod
+    def _options_of(job: dict) -> dict:
+        try:
+            value = json.loads(job.get("options") or "{}")
+        except ValueError:
+            return {}
+        return value if isinstance(value, dict) else {}
 
     # ---- how many analyses run at once -----------------------------------------------------------------------------
 
@@ -392,11 +411,13 @@ class Scheduler:
             self._job_stops[path] = job_stop
         if self.stop_event.is_set():
             job_stop.set()
+        self._job_options[path] = self._options_of(job)
         try:
             result = self.runner(path, self.settings.analysis_timeout_s, job_stop)
         except Exception as exc:  # noqa: BLE001 - a bad file must never stop the worker
             result = RunResult(error=redact(f"{type(exc).__name__}: {exc}"))
         finally:
+            self._job_options.pop(path, None)
             with self._job_lock:
                 self._job_stops.pop(path, None)
             with self._progress_lock:
@@ -520,8 +541,28 @@ class Scheduler:
                 log.exception("%s failed", name)
             self.stop_event.wait(interval)
 
-    def request(self, path: str, priority: int = PRIORITY_DEMAND, at: float | None = None) -> str:
+    def forget(self, path: str) -> str:
+        """Remove a title's saved result so it is `idle` again (see `Store.forget`); `running`, `unknown` and
+        `not-allowed` leave it alone."""
+        local = self.pathmap.to_local(path)
+        status = self.store.forget(local)
+        if status == "idle":
+            self._start_at.pop(local, None)
+            with self._provisional_lock:
+                self._provisional.pop(local, None)
+        return status
+
+    def request(
+        self,
+        path: str,
+        priority: int = PRIORITY_DEMAND,
+        at: float | None = None,
+        options: dict | None = None,
+    ) -> str:
         """Ask for a file to be analysed now: `queued`, `running`, or `unknown` (not a file the scanner has seen).
+
+        `options` (hand re-queues only) say how this one run goes: `{"detailed": true}` skips the survey and reads every
+        keyframe, `{"survey_interval": 2}` surveys every 2 seconds instead of the SURVEY_INTERVAL setting.
 
         `at` is where a player is in the title: the survey starts there, so the stretch being watched is known first.
         If the title is already being analysed from somewhere else (a resume that seeked far, a jump forward), the
@@ -543,7 +584,12 @@ class Scheduler:
                 self._start_at[local] = at
         if row["status"] == "running":
             return "running"
-        queued = self.store.requeue(local, priority, self.clock())
+        queued = self.store.requeue(
+            local,
+            priority,
+            self.clock(),
+            options=json.dumps(options, separators=(",", ":")) if options else None,
+        )
         self._wake.set()
         return "queued" if queued else "unknown"
 

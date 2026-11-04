@@ -120,9 +120,16 @@
     <h2 id="dtitle"></h2>
     <div class="row">
       <button id="reanalyze">Analyze again</button>
+      <label>Pass <select id="passmode">
+        <option value="auto">quick survey first</option>
+        <option value="detailed">detailed (every keyframe)</option>
+      </select></label>
+      <label id="surveylabel">survey every <input type="number" id="surveyint" min="1" max="120" step="1" placeholder="default" style="width:5.5em"> s</label>
+      <button id="forget" title="Delete the saved result; the title goes back to idle and is analysed when a player asks for it">Remove saved result</button>
       <label>Override <select id="ovmode"><option value="">none</option><option value="disable">disable zoom</option></select></label>
       <button id="ovsave">Save</button><span class="muted" id="ovnow"></span>
     </div>
+    <p class="muted" style="margin:6px 0">Quick survey first: looks at one place every few seconds (the SURVEY_INTERVAL setting, or the value you type) and reads every keyframe only if the picture changes. Detailed: skips the survey and reads every keyframe. Either way each change is then placed on its exact frame. Remove saved result: forget the result so the title is idle and is analysed when a player asks.</p>
     <div class="bar" id="bar"></div>
     <div class="scroll"><table id="segs"><thead><tr><th>From</th><th>To</th><th>Ratio</th><th>Picture (x y w h)</th><th>Enter</th></tr></thead><tbody></tbody></table></div>
     <div id="ramps"></div>
@@ -254,10 +261,18 @@ async function refresh() {
   } catch (err) { note(err.message, "bad"); }
 }
 
-async function analyze(path) {
-  const r = await json("/api/v1/analyze", { method: "POST", body: { path, source: "manual" } });
-  note("Analysis: " + (r ? r.status : "unknown"));
+async function analyze(path, extra) {
+  const r = await json("/api/v1/analyze", { method: "POST", body: Object.assign({ path, source: "manual" }, extra || {}) });
+  note("Analysis: " + (r ? r.status : "unknown") + (r && r.options && r.options.detailed ? " (detailed pass)" : r && r.options && r.options.survey_interval ? " (survey every " + r.options.survey_interval + " s)" : ""), "muted", 8);
   refresh();
+}
+
+async function forget(path) {
+  if (!confirm("Remove the saved result for this title?\n\n" + path + "\n\nIt goes back to idle and is analysed when a player asks for it. Any manual override is kept.")) return;
+  const r = await api("/api/v1/forget", { method: "POST", body: { path } });
+  if (r.status === 409 || r.status === 404) { const m = await r.json().catch(() => ({})); note(m.detail || "Could not remove the result", "bad", 8); return; }
+  note("Saved result removed: the title is idle", "muted", 8);
+  refresh(); search(); openTitle(path);
 }
 
 function renderResults(rows) {
@@ -378,7 +393,15 @@ $("resetworkers").onclick = async () => {
     note("Back to the template setting: " + r.workers + " file(s) at once.", "ok", 8);
   } catch (e) { note("Could not change the count: " + e.message, "bad", 8); }
 };
-$("reanalyze").onclick = () => current && analyze(current);
+$("passmode").onchange = () => { $("surveyint").disabled = $("passmode").value === "detailed"; $("surveylabel").style.opacity = $("surveyint").disabled ? 0.5 : 1; };
+$("reanalyze").onclick = () => {
+  if (!current) return;
+  const extra = { mode: $("passmode").value };
+  const s = parseFloat($("surveyint").value);
+  if (extra.mode === "auto" && s >= 1) extra.survey_interval = s;
+  analyze(current, extra);
+};
+$("forget").onclick = () => current && forget(current);
 $("ovsave").onclick = async () => {
   if (!current) return;
   const mode = $("ovmode").value;

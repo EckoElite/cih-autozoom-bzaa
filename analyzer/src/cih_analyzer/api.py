@@ -19,7 +19,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -50,6 +50,17 @@ class AnalyzeBody(Target):
 
     source: str | None = None
     at: float | None = Field(default=None, ge=0, description="where the player is, in seconds")
+    mode: Literal["auto", "detailed"] = Field(
+        default="auto",
+        description="manual requests only. auto: survey first (every SURVEY_INTERVAL seconds, or `survey_interval`), "
+        "then the detailed pass only if the picture changes. detailed: no survey, read every keyframe",
+    )
+    survey_interval: float | None = Field(
+        default=None,
+        ge=1,
+        le=120,
+        description="manual requests, mode auto only: seconds between survey looks",
+    )
 
 
 class OverrideBody(Target):
@@ -106,7 +117,11 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
         return stat.st_size != row["size"] or abs(stat.st_mtime - row["mtime"]) > 1e-3
 
     def queue_for(
-        row: dict[str, Any] | None, local: str | None, player: bool = False, at: float | None = None
+        row: dict[str, Any] | None,
+        local: str | None,
+        player: bool = False,
+        at: float | None = None,
+        options: dict[str, Any] | None = None,
     ) -> str:
         priority = PRIORITY_PLAYER if player else PRIORITY_DEMAND
         if local is None:
@@ -116,7 +131,7 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
                 return "unknown"
             stat = os.stat(local)
             store.seen(local, stat.st_size, stat.st_mtime, version=__version__, priority=priority)
-        return scheduler.request(local, priority, at=at)
+        return scheduler.request(local, priority, at=at, options=options)
 
     @app.get("/health")
     def health() -> JSONResponse:
@@ -171,10 +186,32 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
     @app.post("/api/v1/analyze", dependencies=secured)
     def analyze(target: AnalyzeBody) -> dict[str, Any]:
         row, local = resolve(target)
-        return {
+        manual = target.source == "manual"
+        options: dict[str, Any] = {}
+        if manual and target.mode == "detailed":
+            options["detailed"] = True
+        elif manual and target.survey_interval:
+            options["survey_interval"] = target.survey_interval
+        answer: dict[str, Any] = {
             "path": local,
-            "status": queue_for(row, local, player=target.source != "manual", at=target.at),
+            "status": queue_for(row, local, player=not manual, at=target.at, options=options or None),
         }
+        if options:
+            answer["options"] = options  # only when asked for: players read this answer too
+        return answer
+
+    @app.post("/api/v1/forget", dependencies=secured)
+    def forget(target: Target) -> dict[str, Any]:
+        """Remove a title's saved result so it is idle again, as if never analysed: it is analysed when a player asks for
+        it (or someone presses Analyze). A manual override is kept. 409 if it is running or is skipped/missing."""
+        _, local = resolve(target)
+        status = scheduler.forget(local) if local else "unknown"
+        if status == "unknown":
+            raise HTTPException(404, "no such title")
+        if status in ("running", "not-allowed"):
+            reason = "it is being analysed now" if status == "running" else "it is skipped or missing"
+            raise HTTPException(409, f"its result cannot be removed: {reason}")
+        return {"path": local, "status": status}
 
     @app.get("/api/v1/override", dependencies=secured)
     def get_override(

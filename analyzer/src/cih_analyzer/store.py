@@ -65,11 +65,13 @@ MIGRATIONS: tuple[str, ...] = (
     """,
     # known-variable titles got their own priority between on demand (0) and recent: recent and backlog move down one
     "UPDATE files SET priority = priority + 1 WHERE priority >= 1",
+    # how a hand re-queue asked for the analysis to run (JSON: {"detailed": true} or {"survey_interval": 2}), for one run
+    "ALTER TABLE files ADD COLUMN options TEXT",
 )
 
 _LIST_COLUMNS = (
     "path, size, mtime, status, priority, skip_reason, error, attempts, analyzer_version, analyzed_at, queued_at, "
-    "started_at, duration_s, quick_hash, part_id, rating_key, title, added_at, flags, segments"
+    "started_at, duration_s, quick_hash, part_id, rating_key, title, added_at, flags, segments, options"
 )
 
 
@@ -202,7 +204,7 @@ class Store:
         self._run(
             "UPDATE files SET size=?, mtime=?, status='queued', priority=?, queued_at=?, error=NULL, attempts=0, "
             "timeline=NULL, ramp_raw=NULL, quick_hash=NULL, flags=NULL, segments=NULL, skip_reason=NULL, "
-            "started_at=NULL WHERE path=?",
+            "started_at=NULL, options=NULL WHERE path=?",
             (size, mtime, priority, time.time() if now is None else now, path),
         )
 
@@ -268,7 +270,7 @@ class Store:
         now = time.time() if now is None else now
         self._run(
             "UPDATE files SET status='done', timeline=?, ramp_raw=?, quick_hash=?, analyzer_version=?, flags=?, "
-            "segments=?, duration_s=?, analyzed_at=?, error=NULL, skip_reason=NULL WHERE path=?",
+            "segments=?, duration_s=?, analyzed_at=?, error=NULL, skip_reason=NULL, options=NULL WHERE path=?",
             (
                 timeline_json,
                 ramp_raw_json,
@@ -286,11 +288,21 @@ class Store:
         self._run("UPDATE files SET status='error', error=? WHERE path=?", (error[:2000], path))
 
     def skip(self, path: str, reason: str) -> None:
-        self._run("UPDATE files SET status='skipped', skip_reason=?, error=NULL WHERE path=?", (reason, path))
+        self._run(
+            "UPDATE files SET status='skipped', skip_reason=?, error=NULL, options=NULL WHERE path=?",
+            (reason, path),
+        )
 
-    def requeue(self, path: str, priority: int = PRIORITY_DEMAND, now: float | None = None) -> bool:
+    def requeue(
+        self,
+        path: str,
+        priority: int = PRIORITY_DEMAND,
+        now: float | None = None,
+        options: str | None = None,
+    ) -> bool:
         """Queue a known file again (on demand, or after an error). False if it is unknown or already running; a
-        file that is already queued only has its priority raised."""
+        file that is already queued only has its priority raised (and its `options` replaced if new ones are given).
+        `options` is JSON saying how this one run should go (see `Scheduler.run_one`); the run clears it."""
         now = time.time() if now is None else now
         with self._lock:
             row = self._one("SELECT status, priority FROM files WHERE path=?", (path,))
@@ -298,13 +310,38 @@ class Store:
                 return False
             if row["status"] == "queued":
                 self._run("UPDATE files SET priority=MIN(priority, ?) WHERE path=?", (priority, path))
+                if options is not None:
+                    self._run("UPDATE files SET options=? WHERE path=?", (options, path))
                 return True
             self._run(
-                "UPDATE files SET status='queued', priority=?, queued_at=?, error=NULL, attempts=0, skip_reason=NULL "
-                "WHERE path=?",
-                (priority, now, path),
+                "UPDATE files SET status='queued', priority=?, queued_at=?, error=NULL, attempts=0, skip_reason=NULL, "
+                "options=? WHERE path=?",
+                (priority, now, options, path),
             )
             return True
+
+    FORGETTABLE = ("done", "error", "queued", "idle")
+
+    def forget(self, path: str) -> str:
+        """Drop what is known about a file's picture (timeline, flags, hash, errors) and leave it `idle`, as a title
+        that has never been analysed: it waits until a player asks for it or someone presses Analyze. Returns the
+        new status, or `unknown`, `running` (not touched) or `not-allowed` (a skipped or missing file). A manual
+        override is kept: it is the user's choice, not a result."""
+        with self._lock:
+            row = self._one("SELECT status FROM files WHERE path=?", (path,))
+            if row is None:
+                return "unknown"
+            if row["status"] == "running":
+                return "running"
+            if row["status"] not in self.FORGETTABLE:
+                return "not-allowed"
+            self._run(
+                "UPDATE files SET status='idle', timeline=NULL, ramp_raw=NULL, quick_hash=NULL, flags=NULL, "
+                "segments=NULL, analyzer_version=NULL, analyzed_at=NULL, duration_s=NULL, started_at=NULL, "
+                "error=NULL, attempts=0, skip_reason=NULL, options=NULL WHERE path=?",
+                (path,),
+            )
+            return "idle"
 
     def requeue_one_running(self, path: str) -> bool:
         """A running job that was stopped (not failed) goes back in the queue with its priority kept."""
