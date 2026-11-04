@@ -172,3 +172,21 @@ different aspect cannot give a real 2.35 letterbox here. `wm overscan` does not 
 section 1 ("feasible, test needed") was wrong for this device. Kodi's own CIH remains the working path; the whole-system idea needs a
 different mechanism (per-app settings, or an external video processor or projector aspect feature). Revert recipe: `wm scaling auto`,
 `wm size 1920x1080`, `wm density reset`.
+
+## 8. Per-app options and the SHIELD's own overscan (2026-11-04, read-only inspection)
+
+Settings strings read from the installed APKs (not exercised on the screen):
+
+| App | Relevant options |
+|---|---|
+| Projectivy Launcher 4.72 | Launcher "Top margin (in screen height %)", "Start margin", "End margin"; "Display Zoom" (window-manager size/density tool); no bottom margin seen |
+| SmartTube 32.68 | Video zoom (default / fit width / fit height / fit either / stretch), Aspect ratio, Pixel ratio, UI scale, Video grid scale; no margin or overscan option |
+| Hopwatch 1.3.15 | Its own "Calibrate overscan" screen (visible-region calibration) and zoom in/out controls |
+| Plezy 2.25.0 | Video zoom 50 to 200 % with presets (README); a fixed `video-zoom` through its mpv config (Spike B); UI cannot be moved |
+
+The SHIELD has NVIDIA's `com.nvidia.overscancomp` ("Adjust for overscan", `com.nvidia.overscancomp.action.START_OVERSCANCOMP`). It stores a
+**single** value, `persist.vendor.tegra.hdmi.underscan` (read as 0.24 after the user fitted the picture to the screen height, which is
+1 - 1643/2160 within rounding), and it scales the whole 16:9 output uniformly, so the picture stays 16:9 with black sides. It cannot
+shrink vertically only, so it cannot be combined with `wm size 3840x1632` to cancel the stretch. `persist.sys.displayinset.top` also
+exists (value 0) but a persist.sys property cannot be set from the ADB shell without root. Consequences: underscan fits every app's whole UI
+inside the visible band at about 76 % size; it must be off for Kodi's CIH (CIH needs the full 3840 px frame width).
