@@ -270,3 +270,10 @@ The user chose: batch analysis stays for Movies; TV and everything else are anal
 ## Next
 
 Answer the gate items in `docs/AUDIT_1.md`, then Phase 4 (analyzer service). Phase 5's first step is a read-only log of what PM4K passes to Kodi on a real title. The Shield shortcut to PM4K stays a deferred to-do (above).
+
+## 2026-11-04: daily player decision
+
+- Frame-locked patched Kodi (`org.xbmc.kodi.cih`, CI run 41781145170) is the daily player; the Play Store Kodi stays installed and untouched as a fallback (user: "Keep both").
+- Cuts land within half a content frame (25 of 25, mean -0.12 frame); ramps follow the per-frame table (details in docs/KODI_FORK_PLAN.md).
+- The Shield is the 2017 model without Dolby Vision (user's statement): DV is not applicable on this device.
+- Open: seek into the middle of a ramp, Yellow override key, stable signing key (to stop the uninstall/reinstall per build), library rollout (container paused, 8 titles queued).
