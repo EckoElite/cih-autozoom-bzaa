@@ -83,6 +83,53 @@ def test_a_segment_whose_picture_could_not_be_read_is_folded_into_its_neighbour(
     )  # the unreadable part is covered
 
 
+def test_a_few_seconds_that_could_not_be_read_do_not_widen_a_long_stretch():
+    # The Bear S05E01: 15 minutes of 2.39 and 7 s of credits at the end that read as a bigger picture. The union made
+    # the whole file 1.85.
+    for boundary in (cut(900.0), cut(900.0, confidence=0.5)):  # a trusted and an untrusted boundary alike
+        tail = seg(900, 907, WIDE, verified=False, flags=("unreadable", "needs_review"))
+        out_segments, out_boundaries, merges = settle(
+            [seg(0, 900, SCOPE, verified=True), tail], [boundary], INFO
+        )
+        assert merges == 1 and out_boundaries == []
+        (merged,) = out_segments
+        assert (merged.start, merged.end, merged.rect) == (0, 907, SCOPE)
+        assert "unreadable_absorbed" in merged.flags and "needs_review" in merged.flags
+
+
+def test_credits_then_a_logo_at_the_end_cost_the_long_scene_nothing():
+    # The Bear S05E01, as settle received it: 2.39 for 15 minutes, 4 s of credits that could not be read, then 7 s of
+    # a 1.85 logo whose cut could not be pinned down. The union over everything made the whole episode 1.85. Now the
+    # credits go into the scene, and the logo's cut (between two verified pictures) is placed at the early end of its
+    # window, which keeps the bigger picture on screen.
+    logo = (0, 38, 3840, 2084)
+    segments = [
+        seg(0, 1294.0, SCOPE),
+        seg(1294.0, 1298.0, (616, 432, 2608, 1296), verified=False, flags=("unreadable", "needs_review")),
+        seg(1298.0, 1305.0, logo, confidence=0.5),
+    ]
+    boundaries = [
+        cut(1294.0, confidence=0.0, flags=("unresolved",), window=(1209.9, 1294.0)),
+        cut(1298.0, confidence=0.0, flags=("unresolved",), window=(1294.0, 1298.0)),
+    ]
+    out_segments, out_boundaries, _ = settle(segments, boundaries, INFO)
+    assert [(s.start, s.end, s.rect) for s in out_segments] == [(0, 1294.0, SCOPE), (1294.0, 1305.0, logo)]
+    assert "unreadable_absorbed" in out_segments[0].flags and len(out_boundaries) == 1
+
+
+def test_an_unreadable_start_is_absorbed_by_a_long_stretch_after_it():
+    head = seg(0, 6, WIDE, verified=False, flags=("unreadable",))
+    out_segments, _, merges = settle([head, seg(6, 800, SCOPE)], [cut(6.0)], INFO)
+    assert merges == 1 and [(s.start, s.end, s.rect) for s in out_segments] == [(0, 800, SCOPE)]
+
+
+def test_an_unreadable_stretch_that_is_not_far_shorter_still_gets_the_cautious_union():
+    out_segments, _, _ = settle([seg(0, 100, SCOPE), seg(100, 130, WIDE, verified=False)], [cut(100.0)], INFO)
+    assert [(s.start, s.end, s.rect) for s in out_segments] == [
+        (0, 130, WIDE)
+    ]  # 100 s against 30 s: not 20 to 1
+
+
 def test_a_single_unverified_segment_stays_but_stays_flagged():
     only = seg(0, 30, SCOPE, verified=False, flags=("unreadable",))
     out_segments, out_boundaries, merges = settle([only], [], INFO)

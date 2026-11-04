@@ -627,9 +627,46 @@ def _ramp_not_worth_keeping(
     return all(abs(_zoom(f.fitted.rect, info) / e - 1) < EQUIVALENT_ZOOM for f in b.ramp for e in ends)
 
 
+UNREADABLE_HOST_RATIO = (
+    20.0  # a stretch this many times longer than an unreadable one keeps its own rectangle
+)
+
+
+def _length(s: RefinedSegment) -> float:
+    return s.end - s.start
+
+
+def _absorbs_unreadable(host: RefinedSegment, other: RefinedSegment) -> bool:
+    """`other` could not be read and `host` is verified and so much longer that it keeps its own rectangle over both."""
+    return (
+        other.verified is False
+        and host.verified is not False
+        and _length(host) >= UNREADABLE_HOST_RATIO * max(_length(other), MIN_SEGMENT_S)
+    )
+
+
 def _merge_pair(a: RefinedSegment, b: RefinedSegment, info: VideoInfo) -> RefinedSegment:
     """The two segments as one, over the smallest rectangle that holds both: a rectangle that is too small makes
-    the picture too big for the screen, one that is too large only leaves bars."""
+    the picture too big for the screen, one that is too large only leaves bars.
+
+    The exception is a stretch whose picture could not be read (end credits on black, a dark title card) beside a
+    verified one at least `UNREADABLE_HOST_RATIO` times longer: nothing is known about the short stretch, so widening
+    the long one to cover it would put a guess over most of the file (a 15-minute 2.39 episode zoomed for 1.85
+    because of 7 seconds of credits). The long one keeps its own rectangle, and the merge is flagged."""
+    host, other = (a, b) if _length(a) >= _length(b) else (b, a)
+    if _absorbs_unreadable(host, other):
+        return RefinedSegment(
+            start=a.start,
+            end=b.end,
+            rect=host.rect,
+            aspect=host.aspect,
+            preset=host.preset,
+            confidence=host.confidence,
+            verified=True,
+            flags=tuple(
+                dict.fromkeys([*host.flags, *other.flags, "merged_uncertain", "unreadable_absorbed"])
+            ),
+        )
     union = _union([_rect_edges(a.rect), _rect_edges(b.rect)]).rect
     label, snapped = snap_aspect(_display_aspect(union, info))
     return RefinedSegment(
@@ -658,6 +695,27 @@ def settle(
     """
     segs, bounds = list(segments), list(boundaries)
     merges = 0
+    # First, an unreadable stretch that a much longer verified one swallows (end credits on black beside a 15-minute
+    # scene) stops being a neighbour of whatever follows it, so a cut that comes after it can be placed between two
+    # verified pictures below instead of being merged over the union of both.
+    k = 0
+    while k < len(segs):
+        j = next(
+            (
+                j
+                for j in sorted((k - 1, k + 1), key=lambda n: -_length(segs[n]) if 0 <= n < len(segs) else 0)
+                if 0 <= j < len(segs) and _absorbs_unreadable(segs[j], segs[k])
+            ),
+            None,
+        )
+        if j is None:
+            k += 1
+            continue
+        lo = min(j, k)
+        segs[lo : lo + 2] = [_merge_pair(segs[lo], segs[lo + 1], info)]
+        del bounds[lo]
+        merges += 1
+        k = 0
     for i in range(len(bounds)):
         _place_conservatively(segs, bounds, i, info)
 

@@ -281,3 +281,5 @@ Answer the gate items in `docs/AUDIT_1.md`, then Phase 4 (analyzer service). Pha
 **0.3.13 (2026-11-04): known-variable titles first.** DD43 in `docs/AUDIT_1.md`. Titles on the known-variable list are queued after on demand and players but ahead of recently added titles and the backlog; the status page shows them as "known variable". Schema version 2 (priorities of existing rows move down one). 370 tests pass, ruff clean. Not deployed: needs a push, a CI image build and a container update.
 
 **0.3.13 (2026-11-04), re-run options.** DD44 in `docs/AUDIT_1.md`. The status page can re-run a title as quick-survey-first or detailed, with its own survey interval, and can remove a saved result so the title is idle again. Schema version 3 (`options` column). Not deployed yet: needs a CI image build and a container update.
+
+**0.3.14 (2026-11-04): unreadable stretches no longer widen long ones.** DD45 in `docs/AUDIT_1.md`. The Bear S05E01 was stored as 1.843 for 83% of the episode because 7 s of end credits and an end logo were merged into it over the union rectangle; it is 2.39. 379 tests pass. Not deployed; titles already analysed keep their result until re-queued.
