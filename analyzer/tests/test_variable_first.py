@@ -3,7 +3,7 @@
 import os
 
 from cih_analyzer.scanner import scan_media
-from cih_analyzer.store import PRIORITY_BACKLOG, PRIORITY_DEMAND, PRIORITY_VARIABLE, Store
+from cih_analyzer.store import PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_MEDIUM, Store
 
 V = "0.3.13"
 
@@ -24,8 +24,8 @@ def test_a_listed_title_is_queued_ahead_of_newer_unlisted_ones(tmp_path):
     store = Store(tmp_path / "t.sqlite")
     summary = scan_media([str(root)], store, V)
     assert summary.new == 2
-    assert store.get(dunkirk)["priority"] == PRIORITY_VARIABLE
-    assert store.get(plain)["priority"] == PRIORITY_BACKLOG
+    assert store.get(dunkirk)["priority"] == PRIORITY_MEDIUM
+    assert store.get(plain)["priority"] == PRIORITY_LOW
     assert store.claim_next()["path"] == dunkirk  # the backlog alone would take the newer file first
     assert store.claim_next()["path"] == plain
 
@@ -36,14 +36,14 @@ def test_a_title_added_to_the_extra_list_is_moved_up_at_the_next_scan_and_a_hand
     other = film(root, "Another Film (2023)", 800)
     store = Store(tmp_path / "t.sqlite")
     scan_media([str(root)], store, V)
-    assert store.get(quiet)["priority"] == PRIORITY_BACKLOG
+    assert store.get(quiet)["priority"] == PRIORITY_LOW
     extra = tmp_path / "known.txt"
     extra.write_text("# mine\nSome Quiet Drama (2024)\n", encoding="utf-8")
     summary = scan_media([str(root)], store, V, known_variable_file=str(extra))
     assert summary.raised == 1 and summary.new == 0
-    assert store.get(quiet)["priority"] == PRIORITY_VARIABLE
-    assert store.get(other)["priority"] == PRIORITY_BACKLOG
-    store.requeue(other, PRIORITY_DEMAND)
+    assert store.get(quiet)["priority"] == PRIORITY_MEDIUM
+    assert store.get(other)["priority"] == PRIORITY_LOW
+    store.requeue(other, PRIORITY_HIGH)
     assert [store.claim_next()["path"] for _ in range(2)] == [other, quiet]
     assert (
         scan_media([str(root)], store, V, known_variable_file=str(extra)).raised == 0

@@ -6,10 +6,9 @@ import pytest
 
 from cih_analyzer.store import (
     MIGRATIONS,
-    PRIORITY_BACKLOG,
-    PRIORITY_DEMAND,
-    PRIORITY_RECENT,
-    PRIORITY_VARIABLE,
+    PRIORITY_HIGH,
+    PRIORITY_LOW,
+    PRIORITY_MEDIUM,
     Store,
     major_of,
 )
@@ -26,6 +25,10 @@ def store(tmp_path):
 
 def add(store, path, size=100, mtime=1000.0, **kw):
     return store.seen(path, size, mtime, version=V, **kw)
+
+
+def mark_recent(store, path):
+    store._run("UPDATE files SET recent=1 WHERE path=?", (path,))
 
 
 def finish(store, path, timeline="{}", version=V, quick_hash="h" * 40):
@@ -50,9 +53,10 @@ def test_queue_order_demand_then_recent_then_backlog_newest_first(store):
     add(store, "/m/old.mkv", mtime=100)
     add(store, "/m/new.mkv", mtime=900)
     add(store, "/m/mid.mkv", mtime=500)
-    add(store, "/m/recent.mkv", mtime=50, priority=PRIORITY_RECENT)
+    add(store, "/m/recent.mkv", mtime=50)
+    mark_recent(store, "/m/recent.mkv")
     add(store, "/m/asked.mkv", mtime=10)
-    store.requeue("/m/asked.mkv", PRIORITY_DEMAND)
+    store.requeue("/m/asked.mkv", PRIORITY_HIGH)
     order = [store.claim_next()["path"] for _ in range(5)]
     assert order == ["/m/asked.mkv", "/m/recent.mkv", "/m/new.mkv", "/m/mid.mkv", "/m/old.mkv"]
     assert store.claim_next() is None
@@ -60,24 +64,25 @@ def test_queue_order_demand_then_recent_then_backlog_newest_first(store):
 
 def test_known_variable_titles_come_after_demand_and_before_recent_and_backlog(store):
     add(store, "/m/backlog.mkv", mtime=900)
-    add(store, "/m/recent.mkv", mtime=800, priority=PRIORITY_RECENT)
-    add(store, "/m/var_old.mkv", mtime=10, priority=PRIORITY_VARIABLE)
-    add(store, "/m/var_new.mkv", mtime=20, priority=PRIORITY_VARIABLE)
+    add(store, "/m/recent.mkv", mtime=800)
+    mark_recent(store, "/m/recent.mkv")
+    add(store, "/m/var_old.mkv", mtime=10, priority=PRIORITY_MEDIUM)
+    add(store, "/m/var_new.mkv", mtime=20, priority=PRIORITY_MEDIUM)
     add(store, "/m/asked.mkv", mtime=5)
-    store.requeue("/m/asked.mkv", PRIORITY_DEMAND)
+    store.requeue("/m/asked.mkv", PRIORITY_HIGH)
     order = [store.claim_next()["path"] for _ in range(5)]
     assert order == ["/m/asked.mkv", "/m/var_new.mkv", "/m/var_old.mkv", "/m/recent.mkv", "/m/backlog.mkv"]
-    assert PRIORITY_DEMAND < PRIORITY_VARIABLE < PRIORITY_RECENT < PRIORITY_BACKLOG
+    assert PRIORITY_HIGH < PRIORITY_MEDIUM < PRIORITY_LOW
 
 
 def test_a_queued_title_is_moved_up_when_the_scanner_now_gives_it_a_higher_priority_but_never_down(store):
     add(store, "/m/a.mkv")
-    add(store, "/m/b.mkv", priority=PRIORITY_RECENT)
-    assert add(store, "/m/a.mkv", priority=PRIORITY_VARIABLE) == "raised"
-    assert store.get("/m/a.mkv")["priority"] == PRIORITY_VARIABLE
-    assert add(store, "/m/a.mkv", priority=PRIORITY_VARIABLE) == "unchanged"
+    add(store, "/m/b.mkv", priority=PRIORITY_MEDIUM)
+    assert add(store, "/m/a.mkv", priority=PRIORITY_MEDIUM) == "raised"
+    assert store.get("/m/a.mkv")["priority"] == PRIORITY_MEDIUM
+    assert add(store, "/m/a.mkv", priority=PRIORITY_MEDIUM) == "unchanged"
     assert add(store, "/m/a.mkv") == "unchanged"  # the backlog setting does not demote it
-    assert add(store, "/m/b.mkv") == "unchanged" and store.get("/m/b.mkv")["priority"] == PRIORITY_RECENT
+    assert add(store, "/m/b.mkv") == "unchanged" and store.get("/m/b.mkv")["priority"] == PRIORITY_MEDIUM
 
 
 def test_the_upgrade_makes_room_for_the_new_priority_in_an_old_database(tmp_path):
@@ -92,8 +97,12 @@ def test_the_upgrade_makes_room_for_the_new_priority_in_an_old_database(tmp_path
     db.commit()
     db.close()
     upgraded = Store(path)
-    got = {n: upgraded.get(f"/m/{n}.mkv")["priority"] for n in ("asked", "recent", "backlog")}
-    assert got == {"asked": PRIORITY_DEMAND, "recent": PRIORITY_RECENT, "backlog": PRIORITY_BACKLOG}
+    got = {n: upgraded.get(f"/m/{n}.mkv") for n in ("asked", "recent", "backlog")}
+    assert {n: (r["priority"], r["recent"]) for n, r in got.items()} == {
+        "asked": (PRIORITY_HIGH, 0),
+        "recent": (PRIORITY_LOW, 1),
+        "backlog": (PRIORITY_LOW, 0),
+    }
     upgraded.close()
 
 
@@ -162,16 +171,16 @@ def test_requeue_of_a_running_file_is_refused_and_of_a_queued_one_raises_its_pri
     running = store.queue()[0]
     assert running["status"] == "running" and store.requeue(running["path"]) is False
     waiting = next(r for r in store.queue() if r["status"] == "queued")
-    assert store.requeue(waiting["path"], PRIORITY_DEMAND) is True
-    assert store.get(waiting["path"])["priority"] == PRIORITY_DEMAND
+    assert store.requeue(waiting["path"], PRIORITY_HIGH) is True
+    assert store.get(waiting["path"])["priority"] == PRIORITY_HIGH
 
 
 def test_restart_resets_even_a_running_job(store):
     add(store, "/m/a.mkv")
     store.claim_next()
-    store.restart("/m/a.mkv", 300, 3000.0, PRIORITY_DEMAND)
+    store.restart("/m/a.mkv", 300, 3000.0, PRIORITY_HIGH)
     row = store.get("/m/a.mkv")
-    assert (row["status"], row["size"], row["priority"]) == ("queued", 300, PRIORITY_DEMAND)
+    assert (row["status"], row["size"], row["priority"]) == ("queued", 300, PRIORITY_HIGH)
 
 
 def test_missing_files_are_marked_and_come_back(store):
@@ -191,8 +200,8 @@ def test_plex_ids_lookup_and_recent_boost(store):
     assert store.set_plex("/m/a.mkv", part_id=551, rating_key=42, title="A", added_at=1_000_000.0) is True
     assert store.set_plex("/m/nope.mkv", part_id=1, rating_key=1, title="x", added_at=None) is False
     assert store.boost_recent(900_000.0) == 1
-    assert store.get("/m/a.mkv")["priority"] == PRIORITY_RECENT
-    assert store.get("/m/b.mkv")["priority"] == PRIORITY_BACKLOG
+    assert store.get("/m/a.mkv")["recent"] == 1 and store.get("/m/a.mkv")["priority"] == PRIORITY_LOW
+    assert store.get("/m/b.mkv")["recent"] == 0
     assert store.find(part_id=551)["path"] == "/m/a.mkv"
     assert store.find(rating_key=42)["path"] == "/m/a.mkv"
     assert store.find(path="/m/b.mkv")["path"] == "/m/b.mkv" and store.find(part_id=999) is None

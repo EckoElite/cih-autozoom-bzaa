@@ -12,7 +12,7 @@ import pytest
 from cih_analyzer.pathmap import PathMap
 from cih_analyzer.plex import PlexAuthError, PlexClient, PlexError, RedactingFilter, Section, redact
 from cih_analyzer.scanner import scan_media, sync_plex
-from cih_analyzer.store import PRIORITY_RECENT, Store
+from cih_analyzer.store import Store
 
 TOKEN = "SECRET-TOKEN-123"
 
@@ -302,5 +302,5 @@ def test_sync_attaches_plex_ids_to_scanned_files_and_boosts_recent_titles(tmp_pa
     assert len(summary.errors) == 1 and summary.errors[0].startswith("TV:")
     assert store.find(part_id=11)["path"] == f"{base}/Film (2020)/Film.mkv"
     assert store.find(rating_key=2)["title"] == "Cafe"
-    assert store.get(f"{base}/Film (2020)/Film.mkv")["priority"] == PRIORITY_RECENT
-    assert store.get(f"{base}/Café – 日本語.mkv")["priority"] != PRIORITY_RECENT
+    assert store.get(f"{base}/Film (2020)/Film.mkv")["recent"] == 1
+    assert store.get(f"{base}/Café – 日本語.mkv")["recent"] == 0

@@ -96,12 +96,31 @@ name. Paths are case-sensitive.
 **Large libraries (TV): analysed when played.** Mount the library read-only (for example at `/media/tv`) and set
 `ON_DEMAND_ROOTS` to `/media/tv`. The analyzer then catalogues its files (the status page counts them as "on demand")
 but queues none of them. When you play an episode, the Kodi add-on asks for it by its Plex id; it is analysed at once
-by an express worker (`EXPRESS_WORKERS`, two by default, which keep working even while analysis is paused), the
+by an express worker (`EXPRESS_WORKERS`, three by default, which keep working even while analysis is paused), the
 survey starts where you are watching and the add-on has a first zoom for that stretch within a few seconds (until then
 it shows the whole frame contained in the screen). The survey runs about 25 times faster than playback, so it stays far
 ahead of you; a film or episode that keeps one ratio gets its final timeline in a few minutes, and one that changes
 takes as long as the full pass, with the stretches the survey found steady already played at the right zoom meanwhile. Plex ids are matched to files by folder and file name when no `PATH_MAP` rule
 covers the Plex path. If files were already queued before `ON_DEMAND_ROOTS` was set (the first scan ran without it), the next scan puts the ones nobody asked for back to "on demand".
+
+**The queue and its priorities.** Titles a player is waiting for never queue: three express workers
+(`EXPRESS_WORKERS`) take them at once, even while analysis is paused, and a fourth waits in an express line ahead of
+the queue. Everything else is one queue in four tiers, taken in this order:
+
+| Tier | What puts a title there |
+|---|---|
+| P1 Highest | you pressed Analyze (or Retry) on the status page |
+| P2 High | a re-queue through the API (`source: "manual"`), and automatic re-analysis: the file was replaced, or the analyzer version changed |
+| P3 Medium | the title is on the known-variable list |
+| P4 Low | everything else; titles Plex added in the last `RECENT_DAYS` days go first, then the newest file first |
+
+Inside P1 and P2 the first title in goes first. On the status page, **Up next** (at the bottom) shows the express slots and
+the queue as two lines per title: the title, then its tier, its place in the tier and in the whole queue, and a
+"variable list" tag. Change a title's priority with the menu on its row, tick several and move them together, or drag
+a title: dropped under another title it takes that title's tier, dropped under a heading it goes to the top of that
+tier, and dropped at the very top it becomes P1. A title you placed by hand keeps its place; titles queued later go
+behind it in the same tier, and a title you placed is not moved up by the known-variable list. Searching for a title
+shows the same tier and place while it waits, and the date, analyzer version, pass and time taken once it is done.
 
 ## 4. Settings
 
@@ -120,7 +139,7 @@ All settings are environment variables; change them by editing the container and
 | `START_PAUSED` | `0` | `1` starts with analysis paused until Resume on the status page; the queue still fills, so chosen files can be put first (search the title, then "Analyze again") before anything runs |
 | `PAUSE_ON_TRANSCODE` | `1` | pause while Plex transcodes video |
 | `ON_DEMAND_ROOTS` | | folders inside `/media` (`;` separated) analysed only when a player asks, for example `/media/tv` |
-| `EXPRESS_WORKERS` | `2` | extra workers that take only titles a player is waiting for; they run even while analysis is paused by hand (a re-queue made by hand does not count: it waits for Resume) |
+| `EXPRESS_WORKERS` | `3` | extra workers that take only titles a player is waiting for; they run even while analysis is paused by hand (a re-queue made by hand does not count: it waits for Resume) |
 | `SURVEY_INTERVAL` | `8` | seconds between the places the quick first survey looks at (at least 2; `0` turns it off). A file that shows one picture throughout is finished by the survey; any other file gets the full pass. A short change that falls between two places, in a film that never changes otherwise, is missed |
 | `KNOWN_VARIABLE_FILE` | | optional text file (for example `/config/known_variable.txt`), one `Title (Year)` per line, of extra films that change ratio; they skip the survey and get the full pass, like the titles bundled with the analyzer, and are queued ahead of recently added titles and the backlog (behind only titles asked for by hand or by a player) |
 | `SAMPLE_INTERVAL` | `1` | seconds between sampled keyframes in the full pass (at least 1) |

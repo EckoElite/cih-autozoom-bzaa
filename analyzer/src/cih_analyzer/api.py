@@ -27,9 +27,10 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .config import Settings
+from .known import is_known_variable
 from .pathmap import PathMap, normalize
 from .scheduler import MAX_WORKERS, Scheduler
-from .store import PRIORITY_DEMAND, PRIORITY_PLAYER, Store
+from .store import PRIORITY_HIGH, PRIORITY_HIGHEST, PRIORITY_PLAYER, TIER_NAMES, TIERS, Store
 
 PAGE = Path(__file__).with_name("web") / "index.html"
 LIST_LIMIT = 200
@@ -45,8 +46,9 @@ class Target(BaseModel):
 
 
 class AnalyzeBody(Target):
-    """`source: "manual"` marks a request made by hand (the status page, a script): it waits its turn like the rest of the
-    queue. Anything else, including no source, is a player that is waiting for the title and goes to an express worker."""
+    """`source: "ui"` is a title picked on the status page: it is queued as P1 Highest. `source: "manual"` is a request made
+    by a script or by hand through the API: P2 High. Both wait their turn in the queue. Anything else, including no
+    source, is a player that is waiting for the title and goes to an express worker."""
 
     source: str | None = None
     at: float | None = Field(default=None, ge=0, description="where the player is, in seconds")
@@ -72,12 +74,32 @@ class WorkersBody(BaseModel):
     workers: int = Field(ge=1, le=MAX_WORKERS)
 
 
+class PlaceBody(BaseModel):
+    """Move waiting titles within the queue. `tier` is 1 (Highest) to 4 (Low). `after` is the title they go just below
+    (its tier then wins and `tier` may be left out); with neither `after` nor `end` they go to the top of `tier`; with
+    `end` to its end."""
+
+    paths: list[str] = Field(min_length=1, max_length=500)
+    tier: int | None = Field(default=None, ge=1, le=4)
+    after: str | None = None
+    end: bool = False
+
+
 def _brief(row: dict[str, Any]) -> dict[str, Any]:
     keep = (
         "path", "title", "status", "priority", "skip_reason", "error", "attempts", "analyzer_version", "analyzed_at",
         "queued_at", "started_at", "duration_s", "part_id", "rating_key", "flags", "segments", "size",
     )  # fmt: skip
-    return {k: row.get(k) for k in keep}
+    out = {k: row.get(k) for k in keep}
+    out["ran"] = _json_or_none(row.get("ran"))
+    return out
+
+
+def _json_or_none(text: Any) -> Any:
+    try:
+        return json.loads(text) if text else None
+    except ValueError:
+        return None
 
 
 def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: PathMap) -> FastAPI:
@@ -116,14 +138,37 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
             return False  # not mounted here: serve what we have
         return stat.st_size != row["size"] or abs(stat.st_mtime - row["mtime"]) > 1e-3
 
+    def with_places(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Briefs of `rows`, each waiting one carrying its tier (1-4, or null for express), its spot in the tier and in the
+        whole queue, and whether the title is on the known-variable list."""
+        queued = [r["path"] for r in rows if r["status"] == "queued"]
+        places = store.spots(queued) if queued else {}
+        out = []
+        for r in rows:
+            brief = _brief(r)
+            brief["variable"] = is_known_variable(r["path"], settings.known_variable_file)
+            place = places.get(r["path"])
+            brief["tier"] = place["tier"] if place else None
+            brief["tier_spot"] = place["tier_spot"] if place else None
+            brief["spot"] = place["spot"] if place else None
+            brief["placed"] = r.get("rank") is not None
+            if place:
+                brief["total"] = place["total"]
+            out.append(brief)
+        return out
+
     def queue_for(
         row: dict[str, Any] | None,
         local: str | None,
         player: bool = False,
         at: float | None = None,
         options: dict[str, Any] | None = None,
+        ui: bool = False,
     ) -> str:
-        priority = PRIORITY_PLAYER if player else PRIORITY_DEMAND
+        if player:
+            priority = PRIORITY_PLAYER
+        else:
+            priority = PRIORITY_HIGHEST if ui else PRIORITY_HIGH
         if local is None:
             return "unknown"
         if row is None:
@@ -186,7 +231,8 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
     @app.post("/api/v1/analyze", dependencies=secured)
     def analyze(target: AnalyzeBody) -> dict[str, Any]:
         row, local = resolve(target)
-        manual = target.source == "manual"
+        ui = target.source == "ui"
+        manual = ui or target.source == "manual"
         options: dict[str, Any] = {}
         if manual and target.mode == "detailed":
             options["detailed"] = True
@@ -194,7 +240,7 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
             options["survey_interval"] = target.survey_interval
         answer: dict[str, Any] = {
             "path": local,
-            "status": queue_for(row, local, player=not manual, at=target.at, options=options or None),
+            "status": queue_for(row, local, player=not manual, at=target.at, options=options or None, ui=ui),
         }
         if options:
             answer["options"] = options  # only when asked for: players read this answer too
@@ -267,12 +313,63 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
         }
 
     @app.get("/api/v1/queue", dependencies=secured)
-    def queue(limit: int = Query(100, ge=1, le=LIST_LIMIT)) -> list[dict[str, Any]]:
-        rows = [_brief(r) for r in store.queue(limit)]
+    def queue(
+        limit: int = Query(100, ge=1, le=LIST_LIMIT), offset: int = Query(0, ge=0)
+    ) -> list[dict[str, Any]]:
+        rows = with_places(store.queue(limit, offset))
         for row in rows:
             if row["status"] == "running":
                 row["progress"] = scheduler.progress_of(row["path"])
         return rows
+
+    @app.get("/api/v1/up-next", dependencies=secured)
+    def up_next(limit: int = Query(50, ge=1, le=1000), offset: int = Query(0, ge=0)) -> dict[str, Any]:
+        """The status page's queue: what is running, the express titles a player is waiting for, and `limit` rows of the
+        tiered queue (P1 Highest to P4 Low) from `offset`, each with its tier and spot. `tiers` counts every tier."""
+        running = with_places(
+            [
+                r
+                for r in store.queue(MAX_WORKERS * 4 + scheduler.settings.express_workers)
+                if r["status"] == "running"
+            ]
+        )
+        for row in running:
+            row["progress"] = scheduler.progress_of(row["path"])
+        tiers = store.tier_counts()
+        return {
+            "running": running,
+            "express": with_places(store.express_waiting()),
+            "express_slots": settings.express_workers,
+            "tiers": {str(t): tiers[t] for t in TIERS},
+            "tier_names": {str(t): TIER_NAMES[t] for t in TIERS},
+            "total": sum(tiers.values()),
+            "offset": offset,
+            "items": with_places(store.waiting(limit, offset)),
+        }
+
+    @app.post("/api/v1/place", dependencies=secured)
+    def place(body: PlaceBody) -> dict[str, Any]:
+        """Move waiting titles: to the tier `tier`, just below `after`, or to the end of the tier. A title being
+        analysed is left alone."""
+        tier = body.tier
+        if body.after is not None:
+            below = store.get(pathmap.to_local(body.after))
+            if below is None or below["status"] != "queued" or below["priority"] < 1:
+                raise HTTPException(409, "the title to place it below is not waiting in the queue")
+            tier = below["priority"]
+        if tier is None:
+            tier = PRIORITY_HIGHEST
+        paths = [pathmap.to_local(p) for p in body.paths]
+        try:
+            moved = store.place(
+                paths,
+                tier,
+                after=pathmap.to_local(body.after) if body.after is not None else None,
+                end=body.end,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"moved": moved, "tier": tier}
 
     @app.get("/api/v1/errors", dependencies=secured)
     def errors(limit: int = Query(100, ge=1, le=LIST_LIMIT)) -> list[dict[str, Any]]:
@@ -283,7 +380,7 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
         q: str = Query("", max_length=200), var: int = 0, limit: int = Query(50, ge=1, le=LIST_LIMIT)
     ) -> list[dict[str, Any]]:
         rows = store.var_titles(limit) if var else store.search(q, limit)
-        return [_brief(r) for r in rows]
+        return with_places(rows)
 
     @app.get("/api/v1/ramp", dependencies=secured)
     def ramp(

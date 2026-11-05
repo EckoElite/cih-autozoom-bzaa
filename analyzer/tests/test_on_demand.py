@@ -7,7 +7,7 @@ from cih_analyzer.config import Settings
 from cih_analyzer.pathmap import PathMap
 from cih_analyzer.scanner import scan_media
 from cih_analyzer.scheduler import RunResult, Scheduler
-from cih_analyzer.store import PRIORITY_DEMAND, PRIORITY_PLAYER, Store
+from cih_analyzer.store import PRIORITY_HIGH, PRIORITY_PLAYER, Store
 
 HASH = "b" * 40
 
@@ -53,8 +53,8 @@ def test_an_idle_file_is_queued_at_priority_when_asked_for_and_not_by_a_rescan(t
     store = Store(tmp_path / "s.sqlite")
     scan_media([tv], store, "0.3.8", on_demand_roots=(tv,))
     episode = f"{tv}/s01e01.mkv"
-    assert store.requeue(episode, PRIORITY_DEMAND)
-    assert store.get(episode)["status"] == "queued" and store.get(episode)["priority"] == PRIORITY_DEMAND
+    assert store.requeue(episode, PRIORITY_HIGH)
+    assert store.get(episode)["status"] == "queued" and store.get(episode)["priority"] == PRIORITY_HIGH
     scan_media([tv], store, "0.3.8", on_demand_roots=(tv,))
     assert store.counts() == {"queued": 1, "idle": 1}
     store.close()
@@ -66,11 +66,11 @@ def test_files_queued_before_the_folder_was_marked_on_demand_go_back_to_waiting_
     scan_media([tv], store, "0.3.8")  # the first scan, before ON_DEMAND_ROOTS was set: everything is queued
     assert store.counts() == {"queued": 2}
     asked = f"{tv}/s01e02.mkv"
-    store.requeue(asked, PRIORITY_DEMAND)  # a player asked for this one meanwhile
+    store.requeue(asked, PRIORITY_HIGH)  # a player asked for this one meanwhile
     summary = scan_media([tv], store, "0.3.8", on_demand_roots=(tv,))
     assert summary.idled == 1 and summary.new == 0
     assert store.get(f"{tv}/s01e01.mkv")["status"] == "idle"
-    assert store.get(asked)["status"] == "queued" and store.get(asked)["priority"] == PRIORITY_DEMAND
+    assert store.get(asked)["status"] == "queued" and store.get(asked)["priority"] == PRIORITY_HIGH
     store.close()
 
 
@@ -95,12 +95,12 @@ def test_claim_next_can_be_limited_to_what_a_player_asked_for(tmp_path):
     movies, tv = libraries(tmp_path)
     store = Store(tmp_path / "s.sqlite")
     scan_media([movies], store, "0.3.8")
-    assert store.claim_next(max_priority=PRIORITY_DEMAND) is None  # only backlog work is queued
-    store.requeue(f"{movies}/m1.mkv", PRIORITY_DEMAND)  # a re-queue made by hand is not a player waiting
+    assert store.claim_next(max_priority=PRIORITY_HIGH) is None  # only backlog work is queued
+    store.requeue(f"{movies}/m1.mkv", PRIORITY_HIGH)  # a re-queue made by hand is not a player waiting
     assert store.claim_next(max_priority=PRIORITY_PLAYER) is None
     store.requeue(f"{movies}/m2.mkv", PRIORITY_PLAYER)
     assert store.claim_next(max_priority=PRIORITY_PLAYER)["path"].endswith("m2.mkv")
-    assert store.get(f"{movies}/m1.mkv")["priority"] == PRIORITY_DEMAND  # still queued, still by hand
+    assert store.get(f"{movies}/m1.mkv")["priority"] == PRIORITY_HIGH  # still queued, still by hand
     store.close()
 
 
@@ -189,7 +189,7 @@ def test_a_requeue_made_by_hand_waits_for_resume_and_does_not_take_the_express_l
     sched.scan_now()
     sched.start()
     try:
-        sched.request(f"{movies}/m1.mkv", PRIORITY_DEMAND)  # by hand
+        sched.request(f"{movies}/m1.mkv", PRIORITY_HIGH)  # by hand
         time.sleep(0.6)
         assert ran == [] and store.get(f"{movies}/m1.mkv")["status"] == "queued"
         sched.request(f"{tv}/s01e01.mkv", PRIORITY_PLAYER)  # a player is waiting
@@ -224,5 +224,5 @@ def test_a_request_with_the_playhead_position_is_remembered_and_moves_a_survey_t
     assert sched.request(film, PRIORITY_PLAYER, at=2450.0) == "running" and not stop.is_set()
     assert sched.request(film, PRIORITY_PLAYER, at=2420.0) == "running" and not stop.is_set()
     # a request made by hand never moves anything
-    assert sched.request(film, PRIORITY_DEMAND, at=10.0) == "running" and not stop.is_set()
+    assert sched.request(film, PRIORITY_HIGH, at=10.0) == "running" and not stop.is_set()
     store.close()

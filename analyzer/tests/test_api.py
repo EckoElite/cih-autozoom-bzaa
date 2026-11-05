@@ -10,7 +10,7 @@ from cih_analyzer.api import create_app
 from cih_analyzer.config import Settings
 from cih_analyzer.pathmap import PathMap
 from cih_analyzer.scheduler import RunResult, Scheduler
-from cih_analyzer.store import MIGRATIONS, PRIORITY_DEMAND, PRIORITY_PLAYER, Store
+from cih_analyzer.store import MIGRATIONS, PRIORITY_HIGH, PRIORITY_PLAYER, Store
 
 HASH = "b" * 40
 TIMELINE = {
@@ -117,7 +117,8 @@ def test_the_queue_carries_progress_for_running_files_only(api):
     other.write_bytes(b"x" * 10)
     sched.scan_now()
     claimed = store.claim_next()
-    assert claimed["path"].endswith("Other.mkv")
+    # Film.mkv was analysed by an older analyzer, so it is queued again as High, ahead of the new file
+    assert claimed["path"].endswith("Film.mkv")
     sched._set_progress(claimed["path"], {"phase": "reading", "fraction": 0.4})
     rows = client.get("/api/v1/queue").json()
     (running,) = [r for r in rows if r["status"] == "running"]
@@ -183,7 +184,7 @@ def test_a_post_to_analyze_is_a_player_request_unless_it_says_it_was_made_by_han
     sched.scan_now()
     a, b = (str(f).replace("\\", "/") for f in (first, second))
     assert client.post("/api/v1/analyze", json={"path": a, "source": "manual"}).json()["status"] == "queued"
-    assert store.get(a)["priority"] == PRIORITY_DEMAND
+    assert store.get(a)["priority"] == PRIORITY_HIGH
     assert (
         client.post("/api/v1/analyze", json={"path": b}).json()["status"] == "queued"
     )  # an older add-on sends no source

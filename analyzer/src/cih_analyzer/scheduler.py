@@ -32,7 +32,7 @@ from .config import Settings, in_quiet_hours
 from .pathmap import PathMap
 from .plex import PlexClient, PlexError, redact
 from .scanner import PlexSummary, ScanSummary, scan_media, sync_plex
-from .store import PRIORITY_DEMAND, PRIORITY_PLAYER, Store
+from .store import PRIORITY_HIGH, PRIORITY_PLAYER, Store
 
 log = logging.getLogger(__name__)
 
@@ -257,6 +257,15 @@ class Scheduler:
             on_partial=lambda tl: self._set_provisional(path, tl),
         )
 
+    def _pass_used(self, path: str) -> str:
+        """How the run of `path` is going, as JSON for the finished title's page: `{"pass": "detailed"}` (every keyframe
+        read) or `{"pass": "survey", "interval": seconds}` (the survey, then the detailed pass where the picture changes)."""
+        options = self._job_options.get(path, {})
+        if options.get("detailed"):
+            return json.dumps({"pass": "detailed"})
+        interval = options.get("survey_interval") or self.settings.survey_interval_s
+        return json.dumps({"pass": "survey", "interval": interval})
+
     @staticmethod
     def _options_of(job: dict) -> dict:
         try:
@@ -412,6 +421,7 @@ class Scheduler:
         if self.stop_event.is_set():
             job_stop.set()
         self._job_options[path] = self._options_of(job)
+        ran = self._pass_used(path)
         try:
             result = self.runner(path, self.settings.analysis_timeout_s, job_stop)
         except Exception as exc:  # noqa: BLE001 - a bad file must never stop the worker
@@ -434,7 +444,7 @@ class Scheduler:
             self.store.fail(path, "the file disappeared while it was being analysed")
             return True
         if (after.st_size, after.st_mtime) != (before.st_size, before.st_mtime):
-            self.store.restart(path, after.st_size, after.st_mtime, PRIORITY_DEMAND, self.clock())
+            self.store.restart(path, after.st_size, after.st_mtime, PRIORITY_HIGH, self.clock())
             log.info("%s changed while being analysed; queued again", path)
             return True
         if result.error:
@@ -453,6 +463,7 @@ class Scheduler:
                 segments=len(timeline.get("segments", [])),
                 duration_s=time.monotonic() - started,
                 now=self.clock(),
+                ran=ran,
             )
         else:
             self.store.fail(path, "the analysis returned nothing")
@@ -555,7 +566,7 @@ class Scheduler:
     def request(
         self,
         path: str,
-        priority: int = PRIORITY_DEMAND,
+        priority: int = PRIORITY_HIGH,
         at: float | None = None,
         options: dict | None = None,
     ) -> str:

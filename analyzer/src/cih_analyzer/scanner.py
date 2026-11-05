@@ -17,7 +17,7 @@ from .known import is_known_variable
 from .pathmap import PathMap
 from .plex import PlexAuthError, PlexClient, PlexError
 from .skip import DISC_IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, SkipConfig, path_skip_reason
-from .store import PRIORITY_BACKLOG, PRIORITY_VARIABLE, Store
+from .store import PRIORITY_LOW, PRIORITY_MEDIUM, Store
 
 log = logging.getLogger(__name__)
 
@@ -88,9 +88,7 @@ def scan_media(
                     store.mark_skipped(path, reason, stat.st_size, stat.st_mtime)
                     summary.skipped += 1
                     continue
-                priority = (
-                    PRIORITY_VARIABLE if is_known_variable(path, known_variable_file) else PRIORITY_BACKLOG
-                )
+                priority = PRIORITY_MEDIUM if is_known_variable(path, known_variable_file) else PRIORITY_LOW
                 outcome = store.seen(
                     path, stat.st_size, stat.st_mtime, version=version, priority=priority, now=now,
                     on_demand=path.startswith(on_demand),

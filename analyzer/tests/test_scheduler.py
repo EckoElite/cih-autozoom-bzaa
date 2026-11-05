@@ -12,7 +12,7 @@ from cih_analyzer.config import Settings
 from cih_analyzer.pathmap import PathMap
 from cih_analyzer.plex import PlexError
 from cih_analyzer.scheduler import RunResult, Scheduler, subprocess_runner
-from cih_analyzer.store import PRIORITY_DEMAND, Store
+from cih_analyzer.store import PRIORITY_HIGH, Store
 
 from .conftest import NEEDS_FFMPEG
 from .synth import Seg, make_video, rect_for_ratio
@@ -184,8 +184,8 @@ def test_request_maps_any_name_of_the_file_and_reports_unknown_and_running(env):
     sched, store, root, calls = env
     base = str(root).replace("\\", "/")
     assert sched.run_one()  # one file is now done
-    assert sched.request("/movies/a.mkv", PRIORITY_DEMAND) == "queued"
-    assert store.get(f"{base}/a.mkv")["priority"] == PRIORITY_DEMAND
+    assert sched.request("/movies/a.mkv", PRIORITY_HIGH) == "queued"
+    assert store.get(f"{base}/a.mkv")["priority"] == PRIORITY_HIGH
     assert sched.request("/movies/zzz.mkv") == "unknown"
     store.claim_next()
     running = store.queue()[0]["path"]
@@ -395,7 +395,7 @@ def test_start_paused_keeps_workers_idle_until_resumed_and_lets_a_file_go_first(
     sched.start()
     try:
         assert sched.paused_reason() == "paused"
-        assert sched.request("/movies/c.mkv", PRIORITY_DEMAND) == "queued"  # asked for while paused
+        assert sched.request("/movies/c.mkv", PRIORITY_HIGH) == "queued"  # asked for while paused
         time.sleep(0.3)
         assert ran == [] and store.counts() == {"queued": 3}
         sched.resume()

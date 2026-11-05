@@ -35,6 +35,31 @@
   .chip { display:inline-block; border:1px solid var(--line); border-radius:10px; padding:0 8px; font-size:12px; color:var(--muted); }
   .chip.demand { border-color:var(--accent); color:var(--accent); }
   .err { margin-top:4px; overflow-wrap:anywhere; font-size:13px; }
+
+  /* Up next: two lines per title, a heading per priority, drag to reorder */
+  #queue { gap:4px; }
+  .up { border:1px solid var(--line); border-radius:6px; padding:4px 10px; cursor:grab; background:var(--card); }
+  .up.dragging { opacity:.4; }
+  .up.dropbefore { box-shadow:0 -3px 0 var(--accent); } .up.dropafter { box-shadow:0 3px 0 var(--accent); }
+  .upl1 { display:flex; align-items:center; gap:8px; min-width:0; }
+  .upl1 input[type=checkbox] { min-height:0; width:16px; height:16px; margin:0; flex:none; }
+  .upname { flex:1 1 auto; min-width:0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .upl2 { font-size:12px; margin-left:24px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tiersel { min-height:26px; padding:0 6px; font-size:12px; flex:none; }
+  .tierhead { display:flex; align-items:center; gap:8px; margin-top:8px; padding:2px 4px; font-weight:600; font-size:13px; border-bottom:2px solid var(--line); }
+  .tierhead:first-child { margin-top:0; }
+  .tierhead input[type=checkbox] { min-height:0; width:16px; height:16px; margin:0; }
+  .tierhead.dropbefore { box-shadow:0 -3px 0 var(--accent); }
+  .tierhead.empty { padding:10px 4px; color:var(--muted); font-weight:400; border:1px dashed var(--line); border-radius:6px; }
+  .tierhead.empty.over { border-color:var(--accent); color:var(--accent); }
+  .express { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:6px; margin-bottom:8px; }
+  .slot { border:1px solid var(--accent); border-radius:6px; padding:4px 10px; min-width:0; }
+  .slot.free { border-color:var(--line); border-style:dashed; color:var(--muted); }
+  .slot .name { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:14px; }
+  .slot .track { margin-top:4px; height:6px; }
+  [hidden] { display:none !important; }
+  .bulk { padding:6px 8px; border:1px solid var(--accent); border-radius:6px; }
+  .info { font-size:12px; color:var(--muted); margin-top:4px; }
   .job .row { margin:8px 0 0; }
 
   /* progress */
@@ -96,12 +121,6 @@
   </section>
 
   <section>
-    <h2>Up next</h2>
-    <div class="list" id="queue"></div>
-    <p class="muted" id="more"></p>
-  </section>
-
-  <section>
     <h2>Errors</h2>
     <div class="list" id="errors"></div>
     <p class="muted" id="noerrors">None.</p>
@@ -133,6 +152,20 @@
     <div class="bar" id="bar"></div>
     <div class="scroll"><table id="segs"><thead><tr><th>From</th><th>To</th><th>Ratio</th><th>Picture (x y w h)</th><th>Enter</th></tr></thead><tbody></tbody></table></div>
     <div id="ramps"></div>
+  </section>
+
+  <section id="upnext">
+    <h2>Up next</h2>
+    <div class="express" id="express"></div>
+    <p class="muted" id="queuehint">Drag a title to change its place. Dropped below a title, it takes that title's priority; dropped under a heading, it goes to the top of that priority. P1 is taken first.</p>
+    <div class="row bulk" id="bulk" hidden>
+      <b id="bulkn"></b>
+      <label>move to <select id="bulktier"></select></label>
+      <button id="bulkgo" title="Put the selected titles at the end of that priority">Move</button>
+      <button id="bulkclear">Clear selection</button>
+    </div>
+    <div class="list" id="queue"></div>
+    <div class="row"><button id="loadmore" hidden>Load more</button><span class="muted" id="more"></span></div>
   </section>
 </main>
 <script>
@@ -172,7 +205,25 @@ async function json(path, opts) {
   return r.status === 404 ? null : r.json();
 }
 const when = (t) => t ? new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
-const PRIORITY = { "-1": "playing now", 0: "on demand", 1: "known variable", 2: "recent", 3: "backlog" };
+const TIER = { 1: "Highest", 2: "High", 3: "Medium", 4: "Low" };
+const tierName = (t) => "P" + t + " " + TIER[t];
+const fullDate = (t) => t ? new Date(t * 1000).toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+// where a waiting title stands: "P3 Medium · #12 in tier · #37 of 2,104"
+function placeText(r) {
+  if (r.status !== "queued") return "";
+  if (!r.tier) return r.priority <= 0 ? "Express · a player is waiting" : "";
+  return tierName(r.tier) + " · #" + r.tier_spot.toLocaleString() + " in tier · #" + r.spot.toLocaleString() + " of " + r.total.toLocaleString();
+}
+function passText(ran) {
+  if (!ran) return "";
+  return ran.pass === "detailed" ? "detailed pass (every keyframe)" : "quick survey every " + ran.interval + " s";
+}
+// what the analyzer knows about a finished title: when, with which version, how
+function doneText(r) {
+  if (r.status !== "done" || !r.analyzed_at) return "";
+  return ["Processed " + fullDate(r.analyzed_at), "analyzer v" + (r.analyzer_version || "?"), passText(r.ran),
+    r.duration_s ? "took " + minutes(r.duration_s) : ""].filter(Boolean).join(" · ");
+}
 
 // "/media/movies/Dunkirk (2017)/Dunkirk (2017) 4k HDR.mkv" -> name "Dunkirk (2017) 4k HDR", folder "movies / Dunkirk (2017)"
 function labels(r) {
@@ -204,16 +255,123 @@ function progressBlock(r) {
 
 function runningCard(r) {
   return el("div", { className: "job" }, nameBlock(r),
-    el("div", { className: "meta" }, r.priority === 0 ? el("span", { className: "chip demand", textContent: "on demand" }) : null,
+    el("div", { className: "meta" }, r.priority >= 1 ? el("span", { className: "chip", textContent: tierName(r.priority) }) : null,
+      r.variable ? el("span", { className: "chip", textContent: "variable list" }) : null,
       r.size ? span((r.size / 2 ** 30).toFixed(1) + " GiB") : null),
     progressBlock(r));
 }
-function queuedCard(r) {
-  return el("div", { className: "job queued" }, nameBlock(r),
-    el("div", { className: "meta" }, el("span", { className: "chip" + (r.priority <= 0 ? " demand" : ""), textContent: PRIORITY[r.priority] }), span("queued " + when(r.queued_at))));
-}
 
 function fill(list, cards) { list.textContent = ""; for (const c of cards) list.append(c); }
+
+// ---- Up next: express slots, then P1-P4 with drag and drop --------------------------------------------------------
+let upLimit = 50, dragged = null, lastUp = null;
+const selected = new Set();
+
+function displayName(r) { return labels(r).name; }
+async function place(body, done) {
+  try {
+    const r = await api("/api/v1/place", { method: "POST", body });
+    if (!r.ok) { const m = await r.json().catch(() => ({})); note(m.detail || "Could not move it", "bad", 8); }
+    else { const m = await r.json(); note(m.moved ? "Moved " + m.moved + " title(s) to " + tierName(m.tier) : "Nothing to move: the title is not waiting", "ok", 6); if (done) done(); }
+  } catch (e) { note("Could not move it: " + e.message, "bad", 8); }
+  loadUpNext();
+}
+function tierSelect(r) {
+  const s = el("select", { className: "tiersel", title: "Priority: choose one to move this title to the end of that priority" });
+  for (const t of [1, 2, 3, 4]) s.append(el("option", { value: String(t), textContent: tierName(t) }));
+  s.value = String(r.tier);
+  s.onchange = () => place({ paths: [r.path], tier: Number(s.value), end: true });
+  s.onmousedown = (e) => e.stopPropagation();
+  return s;
+}
+function upRow(r) {
+  const cb = el("input", { type: "checkbox", checked: selected.has(r.path), title: "Select" });
+  cb.onchange = () => { cb.checked ? selected.add(r.path) : selected.delete(r.path); showBulk(); };
+  const row = el("div", { className: "up", draggable: true },
+    el("div", { className: "upl1" }, cb, el("span", { className: "upname", textContent: displayName(r), title: r.path }), tierSelect(r)),
+    el("div", { className: "upl2 muted" }, span(placeText(r)), r.variable ? el("span", { className: "chip", textContent: "variable list", style: "margin-left:8px" }) : null));
+  row.dataset.path = r.path; row.dataset.tier = String(r.tier);
+  row.ondragstart = (e) => {
+    const rows = [...$("queue").querySelectorAll(".up")];
+    dragged = selected.has(r.path) ? rows.filter((x) => selected.has(x.dataset.path)) : [row];
+    dragged.forEach((x) => x.classList.add("dragging"));
+    e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragged.map((x) => x.dataset.path).join("\n"));
+  };
+  row.ondragend = () => { (dragged || []).forEach((x) => x.classList.remove("dragging")); dragged = null; clearMarks(); };
+  return row;
+}
+function tierHead(t, count, loaded) {
+  const empty = count === 0;
+  const cb = el("input", { type: "checkbox", title: "Select the loaded titles of this priority" });
+  cb.onchange = () => { $("queue").querySelectorAll('.up[data-tier="' + t + '"]').forEach((x) => { cb.checked ? selected.add(x.dataset.path) : selected.delete(x.dataset.path); x.querySelector("input").checked = cb.checked; }); showBulk(); };
+  const h = el("div", { className: "tierhead" + (empty ? " empty" : "") }, empty ? null : cb,
+    el("span", { textContent: tierName(t) + (empty ? " · empty, drop here" : " · " + count.toLocaleString() + (loaded < count ? " (" + loaded + " shown)" : "")) }));
+  h.dataset.tier = String(t);
+  return h;
+}
+function clearMarks() { $("queue").querySelectorAll(".dropbefore, .dropafter, .over").forEach((x) => x.classList.remove("dropbefore", "dropafter", "over")); }
+// where a drop at height y lands: the tier (and the title it goes below, if any)
+function dropTarget(y) {
+  const kids = [...$("queue").children].filter((c) => !c.classList.contains("dragging"));
+  for (const c of kids) {
+    const b = c.getBoundingClientRect();
+    if (c.classList.contains("empty") && y >= b.top && y <= b.bottom) return { tier: Number(c.dataset.tier), mark: c, cls: "over" };
+  }
+  let idx = kids.length;
+  for (let i = 0; i < kids.length; i++) {
+    const b = kids[i].getBoundingClientRect();
+    if (y < b.top + b.height / 2) { idx = i; break; }
+  }
+  const prev = idx > 0 ? kids[idx - 1] : null, next = kids[idx] || null;
+  const mark = next || prev, cls = next ? "dropbefore" : "dropafter";
+  if (!prev) return { tier: 1, mark, cls };
+  if (prev.classList.contains("tierhead")) return { tier: Number(prev.dataset.tier), mark, cls };
+  return { after: prev.dataset.path, mark, cls };
+}
+function showBulk() {
+  $("bulk").hidden = selected.size === 0;
+  $("bulkn").textContent = selected.size + " selected";
+}
+function slotCard(r) {
+  const p = r.progress, pct = p ? Math.min(99, Math.round(p.fraction * 100)) : 0;
+  const track = el("div", { className: "track" });
+  track.append(el("div", { className: "fill" + (p ? "" : " wait"), style: p ? "width:" + pct + "%" : "" }));
+  return el("div", { className: "slot" }, el("div", { className: "name", textContent: displayName(r), title: r.path }),
+    el("div", { className: "muted", textContent: "Express · " + (p ? ({ surveying: "surveying", reading: "reading the file" }[p.phase] || "checking changes") + " " + pct + "%" : "starting") }), track);
+}
+function renderExpress(u) {
+  const running = u.running.filter((r) => r.priority <= 0), cards = [];
+  for (let i = 0; i < u.express_slots; i++) {
+    cards.push(running[i] ? slotCard(running[i]) : el("div", { className: "slot free" }, "Express slot " + (i + 1) + " · free"));
+  }
+  for (const r of u.express) cards.push(el("div", { className: "slot free" }, "Waiting for a slot: " + displayName(r)));
+  fill($("express"), cards);
+}
+function renderUpNext(u) {
+  lastUp = u;
+  renderExpress(u);
+  const list = $("queue"); list.textContent = "";
+  for (const t of [1, 2, 3, 4]) {
+    const mine = u.items.filter((r) => r.tier === t), count = u.tiers[String(t)];
+    list.append(tierHead(t, count, mine.length));
+    for (const r of mine) list.append(upRow(r));
+  }
+  const rest = u.total - u.items.length;
+  $("loadmore").hidden = rest <= 0; $("loadmore").textContent = "Load " + Math.min(50, rest) + " more";
+  $("more").textContent = rest > 0 ? rest.toLocaleString() + " more waiting, not shown" : (u.total ? "All " + u.total.toLocaleString() + " waiting titles shown" : "Nothing is waiting.");
+  showBulk();
+}
+async function loadUpNext() {
+  const u = await json("/api/v1/up-next?limit=" + upLimit);
+  if (!u) return;
+  const sel = document.activeElement;
+  if (dragged || (sel && sel.classList && sel.classList.contains("tiersel"))) return;  // never rebuild the list under a drag or an open menu
+  for (const p of [...selected]) if (!u.items.some((r) => r.path === p)) selected.delete(p);
+  renderUpNext(u);
+  const running = u.running.filter((r) => r.priority > 0);
+  fill($("running"), running.map(runningCard));
+  $("runningnone").hidden = running.length > 0;
+}
 
 async function refresh() {
   try {
@@ -243,13 +401,7 @@ async function refresh() {
       (sc.last_scan ? "Last scan " + when(sc.last_scan.at) + " (" + sc.last_scan.seen + " files). " : "") +
       (s.plex.enabled ? (sc.last_plex ? (sc.last_plex.error ? "Plex: " + sc.last_plex.error : "Plex synced " + when(sc.last_plex.at) + " (" + sc.last_plex.matched + " matched).") : "Plex not synced yet.") : "Plex not configured.");
 
-    const q = await json("/api/v1/queue?limit=" + Math.min(200, sc.workers * 2 + 20)) || [];
-    const running = q.filter((r) => r.status === "running"), queued = q.filter((r) => r.status !== "running").slice(0, 12);
-    fill($("running"), running.map(runningCard));
-    $("runningnone").hidden = running.length > 0;
-    fill($("queue"), queued.map(queuedCard));
-    const rest = (s.counts.queued || 0) - queued.length;
-    $("more").textContent = rest > 0 ? "and " + rest.toLocaleString() + " more queued" : "";
+    await loadUpNext();
 
     const e = await json("/api/v1/errors?limit=30") || [];
     $("noerrors").hidden = e.length > 0;
@@ -262,7 +414,7 @@ async function refresh() {
 }
 
 async function analyze(path, extra) {
-  const r = await json("/api/v1/analyze", { method: "POST", body: Object.assign({ path, source: "manual" }, extra || {}) });
+  const r = await json("/api/v1/analyze", { method: "POST", body: Object.assign({ path, source: "ui" }, extra || {}) });
   note("Analysis: " + (r ? r.status : "unknown") + (r && r.options && r.options.detailed ? " (detailed pass)" : r && r.options && r.options.survey_interval ? " (survey every " + r.options.survey_interval + " s)" : ""), "muted", 8);
   refresh();
 }
@@ -279,10 +431,13 @@ function renderResults(rows) {
   fill($("results"), rows.map((r) => {
     const open = el("button", { textContent: "Open" }); open.onclick = () => { openTitle(r.path); $("detail").scrollIntoView({ behavior: "smooth" }); };
     const flags = (r.flags || "").split(",").filter(Boolean).join(" · ");
+    const queued = r.status === "queued" && r.tier ? tierSelect(r) : null;
     return el("div", { className: "job" }, nameBlock(r),
       el("div", { className: "meta" }, span(r.status + (r.skip_reason ? " (" + r.skip_reason + ")" : "")),
+        placeText(r) ? span(placeText(r)) : null, r.variable ? el("span", { className: "chip", textContent: "variable list" }) : null,
         r.segments == null ? null : span(r.segments + (r.segments === 1 ? " segment" : " segments")), flags ? span(flags) : null),
-      el("div", { className: "row" }, open));
+      doneText(r) ? el("div", { className: "info", textContent: doneText(r) }) : null,
+      el("div", { className: "row" }, open, queued));
   }));
 }
 async function search() { renderResults(await json("/api/v1/files?q=" + encodeURIComponent($("q").value)) || []); }
@@ -331,6 +486,26 @@ function plot(r) {
   });
   return svg;
 }
+for (const t of [1, 2, 3, 4]) $("bulktier").append(el("option", { value: String(t), textContent: tierName(t) }));
+$("bulkgo").onclick = () => place({ paths: [...$("queue").querySelectorAll(".up")].map((x) => x.dataset.path).filter((p) => selected.has(p)), tier: Number($("bulktier").value), end: true }, () => { selected.clear(); });
+$("bulkclear").onclick = () => { selected.clear(); $("queue").querySelectorAll("input[type=checkbox]").forEach((c) => { c.checked = false; }); showBulk(); };
+$("loadmore").onclick = () => { upLimit = Math.min(1000, upLimit + 50); loadUpNext(); };
+$("queue").ondragover = (e) => {
+  if (!dragged) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = "move";
+  clearMarks();
+  const t = dropTarget(e.clientY);
+  if (t.mark) t.mark.classList.add(t.cls);
+};
+$("queue").ondragleave = (e) => { if (!$("queue").contains(e.relatedTarget)) clearMarks(); };
+$("queue").ondrop = (e) => {
+  if (!dragged) return;
+  e.preventDefault();
+  const t = dropTarget(e.clientY), paths = dragged.map((x) => x.dataset.path);
+  clearMarks();
+  dragged.forEach((x) => x.classList.remove("dragging")); dragged = null;
+  place(t.after ? { paths, after: t.after } : { paths, tier: t.tier }, () => { selected.clear(); });
+};
 $("go").onclick = search; $("q").onkeydown = (e) => { if (e.key === "Enter") search(); };
 $("vars").onclick = async () => renderResults(await json("/api/v1/files?var=1&limit=200") || []);
 $("pause").onclick = async () => {
