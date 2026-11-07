@@ -257,6 +257,24 @@ Read from Plezy 2.25.0 (commit `ffe7d79`) and Kodi's `21.2-Omega` source (`XBMCA
 
 **Provisional position for the matrix (Spike C column), source reading only:** zoom, frame accuracy, glitch behaviour and ramps inherit Spike A (route is Kodi's internal player); HDR10 kept (measured in Spike A), DV untested; seek/resume hooks: the add-on has them, but resume and progress sync to Plex do not exist yet; fits the Plezy workflow partly (launch from Plezy, lose its resume and progress); build effort medium (add-on grows a Plex client); maintenance risk lower than a Plezy fork, since Kodi's add-on API is stable.
 
+### Spike C on-device test (2026-11-07, patched Kodi `org.xbmc.kodi.cih`)
+
+Plezy set to a custom external player with package `org.xbmc.kodi.cih`; the user played *Everything Everywhere All at Once* (Plex part 168355) from Plezy. Evidence: the user's description, `kodi.log`, `cih_zoom.txt` (tokens redacted) and one read-only Plex query.
+
+| Question | Result | Basis |
+|---|---|---|
+| Does Plezy launch `.cih` and does it play? | **Yes.** Kodi opened for about 3 s, then played | user; log `VideoPlayer::OpenFile` 17:08:13 |
+| What does Kodi receive? | A `https://<ip>.<id>.plex.direct:32400/library/parts/168355/<ts>/file.mkv?X-Plex-Token=...` URL | log |
+| Does the add-on identify the title and get a plan? | **Yes.** `title plex-part at 1 s, analyzer ok, plan ready` (1147 table entries) | log |
+| Zoom | Worked correctly, including a ramp step sequence in the table | user; `CIH zoom` lines |
+| Resume | **Lost.** Playback started at 0.0 s although Plex holds an offset of 2783 s for this title | log (`picture time 0.0`); Plex `viewOffset` |
+| Progress back to Plex | **Not synced.** Plex's `lastViewedAt` for the title is 292 s before the test started | Plex query |
+| Back button | Goes to Kodi's home; the video keeps playing behind it. Plezy is not returned to | user; log `Home.xml` loaded 17:09:50, no stop event |
+| Subtitles | Off the screen (R13, deferred, D7) | user |
+| Other | Three HTTP 401 lines at open (playback continued); the full URL with token is in Kodi's log on the Shield | log |
+
+**Verdict:** the zoom works through the hand-off. What is missing is the Plezy-side behaviour (resume, progress, return to Plezy), which Kodi does not provide and PM4K does. The earlier source reading is confirmed.
+
 ## Spike D: mpv-android as Plezy's external player (source reading plus read-only checks, 2026-10-28)
 
 Read from `github.com/mpv-android/mpv-android` at commit `d25d7c1` (latest release tag dated 2026-09-17), and from Plezy's launcher code (Spike C). Four read-only `adb` queries on the Shield changed nothing. **mpv-android is not installed on the Shield and nothing was played.**
