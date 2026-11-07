@@ -6,8 +6,10 @@ header, gaps) by SCALE, so the layout fits 816 rows and the rows run the full wi
 keeps its size (fonts are not touched).
 
 What is scaled, per control: posx, posy, width, height, left, right, top, bottom, itemgap, textoffsetx/y; the width /
-height of item layouts; slide distances; hit rectangles. What is not: full-screen background images, and any width of
-1800 or more (a row or group that spans the screen keeps spanning it). A fixed list keeps its focused slot where it was.
+height of item layouts; slide distances; hit rectangles. What is not: full-screen background images, any width of 1800
+or more (a row or group that spans the screen keeps spanning it and stays put), and the height of text and of rows made only of text (text keeps
+its size, so a shorter or narrower box would clip or truncate it, except for captions inside list items). Inside a full-width parent, an element near the right edge stays near the right
+edge and a centred one stays centred. A fixed list keeps its focused slot where it was.
 The window origin is moved to WINDOW_TOP (a few rows above the band) so the backgrounds cover the whole band; top-level
 controls are moved down by the difference. Two black bars drawn on top hide everything above and below the band, so no
 light spills onto the wall around the screen.
@@ -97,9 +99,41 @@ def is_background(control: ET.Element) -> bool:
     return control.get("type") == "group" and bool(kids) and all(is_background(kid) for kid in kids)
 
 
-def scale_control(control: ET.Element, top_level: bool) -> None:
+TEXT_TYPES = ("label", "fadelabel")
+TEXT_ROW_MAX = 120  # a group of text this tall or less is a row of text
+
+
+def is_text_row(control: ET.Element) -> bool:
+    """text, or a button / group made only of text: it keeps its height, since its text keeps its size"""
+    kind = control.get("type")
+    if kind in TEXT_TYPES + ("textbox",):
+        return True
+    height = number(control.find("height"))
+    if kind == "button":
+        return control.find("label") is not None and (height is None or height <= 80)
+    if kind in ("group", "grouplist"):
+        kids = control.findall("control")
+        return bool(kids) and (height is None or height <= TEXT_ROW_MAX) and all(is_text_row(k) for k in kids)
+    return False
+
+
+def anchored_x(x: float, width: float, new_width: float, parent_width: float) -> float:
+    """new posx for an element inside a parent that keeps its full width: left-side elements scale about the left edge,
+    right-side ones about the right edge, centred ones about the centre, so each keeps its place relative to the edge it
+    is near (the A-Z jump bar stays at the right edge instead of sliding into the grid)."""
+    centre = x + width / 2
+    if centre < 0.35 * parent_width:
+        return x * SCALE
+    if centre > 0.65 * parent_width:
+        return parent_width - (parent_width - x - width) * SCALE - new_width
+    return parent_width / 2 + (centre - parent_width / 2) * SCALE - new_width / 2
+
+
+def scale_control(control: ET.Element, top_level: bool, parent_width: float | None = None, in_item: bool = False) -> None:
     if is_fullscreen_image(control):
         return
+    if top_level:
+        parent_width = 1920.0
     keep_focus_slot = None
     layout = control.find("itemlayout")
     focus = control.find("focusposition")
@@ -107,12 +141,32 @@ def scale_control(control: ET.Element, top_level: bool) -> None:
         old_width = layout.get("width")
         if old_width and number(control.find("posx")) is not None:
             keep_focus_slot = (number(control.find("posx")), float(focus.text), float(old_width))
+    width0 = number(control.find("width"))
+    height0 = number(control.find("height"))
+    posx0, posy0 = number(control.find("posx")), number(control.find("posy"))
+    keeps_width = width0 is not None and width0 >= KEEP_WIDTH
+    is_text = is_text_row(control)
+    keep_text_width = is_text and not in_item  # outside list items, text keeps its box width too (no extra truncation)
+    aligny = control.find("aligny")
+    centred_text = control.get("type") in TEXT_TYPES and aligny is not None and (aligny.text or "").strip() == "center"
     for tag in H_TAGS + V_TAGS + BOTH_TAGS:
         element = control.find(tag)
         if element is None:
             continue
         old = number(element)
-        if old is None or (tag == "width" and old >= KEEP_WIDTH):
+        if old is None or (tag == "width" and (old >= KEEP_WIDTH or keep_text_width)):
+            continue
+        if tag == "height" and is_text:
+            continue  # text keeps its size, so its box keeps its height (a shorter one would clip the glyphs)
+        relative = element.text.strip().endswith("r")
+        if tag == "posx" and parent_width and not relative:
+            if keeps_width:
+                continue  # spans its parent: leave it where it is
+            new_w = (width0 or 0.0) if keep_text_width else (width0 or 0.0) * SCALE
+            element.text = fmt(anchored_x(old, width0 or 0.0, new_w, parent_width))
+            continue
+        if tag == "posy" and centred_text and height0 and not relative:
+            element.text = fmt(SCALE * (old + height0 / 2) - height0 / 2)  # keep the text's centre where scaling puts it
             continue
         new = scaled(element.text)
         if new is not None:
@@ -142,12 +196,13 @@ def scale_control(control: ET.Element, top_level: bool) -> None:
                 hitrect.set(attr, scaled(hitrect.get(attr)) or hitrect.get(attr))
     for anim in list(control.findall("animation")):
         scale_animation(anim)
+    kid_parent_width = width0 if keeps_width else None
     for kid in control.findall("control"):
-        scale_control(kid, False)
+        scale_control(kid, False, kid_parent_width, in_item)
     for tag in ("itemlayout", "focusedlayout"):
         for node in control.findall(tag):
             for kid in node.findall("control"):
-                scale_control(kid, False)
+                scale_control(kid, False, None, True)
 
 
 def scale_slide(node: ET.Element) -> None:
@@ -173,6 +228,23 @@ def scale_animation(anim: ET.Element) -> None:
     for effect in anim.findall("effect"):
         if effect.get("type") == "slide":
             scale_slide(effect)
+
+
+# per-page nudges after scaling: (control id, rows to move it up). The cast row on the movie page would otherwise end
+# with its role lines cut by the bottom of the band.
+TWEAKS = {
+    "script-plex-pre_play.xml": [("60", 40)],
+    "script-plex-pre_play-wl.xml": [("60", 40)],
+}
+
+
+def apply_tweaks(name: str, controls: ET.Element) -> None:
+    for control_id, up in TWEAKS.get(name, []):
+        for control in controls.iter("control"):
+            if control.get("id") == control_id and control.find("posy") is not None:
+                value = number(control.find("posy"))
+                if value is not None:
+                    control.find("posy").text = fmt(value - up)
 
 
 def add_masks(controls: ET.Element) -> None:
@@ -204,6 +276,7 @@ def patched_tree(path: Path) -> bytes:
         raise ValueError("no <controls>")
     for control in controls.findall("control"):
         scale_control(control, True)
+    apply_tweaks(path.name, controls)
     add_masks(controls)
     root.insert(0, ET.Comment(MARKER))
     ET.indent(root, space="    ")
