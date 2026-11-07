@@ -103,6 +103,11 @@ TEXT_TYPES = ("label", "fadelabel")
 TEXT_ROW_MAX = 120  # a group of text this tall or less is a row of text
 
 
+def is_small_image(control: ET.Element) -> bool:
+    height = number(control.find("height"))
+    return control.get("type") == "image" and height is not None and height <= 60
+
+
 def is_text_row(control: ET.Element) -> bool:
     """text, or a button / group made only of text: it keeps its height, since its text keeps its size"""
     kind = control.get("type")
@@ -113,7 +118,12 @@ def is_text_row(control: ET.Element) -> bool:
         return control.find("label") is not None and (height is None or height <= 80)
     if kind in ("group", "grouplist"):
         kids = control.findall("control")
-        return bool(kids) and (height is None or height <= TEXT_ROW_MAX) and all(is_text_row(k) for k in kids)
+        return (
+            bool(kids)
+            and (height is None or height <= TEXT_ROW_MAX)
+            and all(is_text_row(k) or is_small_image(k) for k in kids)
+            and any(is_text_row(k) for k in kids)
+        )
     return False
 
 
