@@ -21,6 +21,7 @@ from cih_analyzer.segmentation import SegmentationParams, segment_samples
 from cih_analyzer.store import PRIORITY_HIGH, PRIORITY_MEDIUM, Store
 
 from .conftest import NEEDS_FFMPEG
+from .helpers import make_info
 from .synth import Seg, make_video, rect_for_ratio
 from .test_refine import opening, smoothstep
 
@@ -61,12 +62,22 @@ class TestDensePass:
         result = dense_pass(path, info, base)
         assert [s.rect for s in result.segments] == [SCOPE]
 
-    def test_a_short_shot_with_no_scene_change_at_its_edges_is_not_followed(self, tmp_path):
-        # the same picture level either side: a matte that changes with nothing else changing is a misread, not a shot
-        path = video(tmp_path, "samelevel.mp4", [(830, SCOPE, 110), (15, WIDE, 110), (655, SCOPE, 110)])
+    def test_a_short_smaller_picture_with_no_scene_change_at_its_edges_is_not_followed(self, tmp_path):
+        # the same picture level either side: a matte that shrinks with nothing else changing is a misread, not a shot
+        path = video(tmp_path, "samelevel.mp4", [(830, WIDE, 110), (15, SCOPE, 110), (655, WIDE, 110)])
         info, base = first_pass(path)
         result = dense_pass(path, info, base)
-        assert [s.rect for s in result.segments] == [SCOPE]
+        assert [s.rect for s in result.segments] == [WIDE]
+
+    def test_a_short_bigger_picture_is_followed_even_when_the_scene_cut_test_says_no(self, tmp_path):
+        # in a fast montage the scene-cut test measures a change against its busy neighbourhood and misses real
+        # cuts (Everything Everywhere at 7023 s: an 11-frame 1.85 shot between scope shots, scene_cut False). A
+        # bigger picture with clean edges is followed: leaving it out puts light past the screen edges.
+        path = video(tmp_path, "biglevel.mp4", [(830, SCOPE, 110), (15, WIDE, 110), (655, SCOPE, 110)])
+        info, base = first_pass(path)
+        result = dense_pass(path, info, base)
+        assert [s.rect for s in result.segments] == [SCOPE, WIDE, SCOPE]
+        assert [b.frame for b in result.boundaries] == [830, 845]
 
     def test_a_dim_shot_that_looks_smaller_is_not_followed_but_a_dim_bigger_one_is(self, tmp_path):
         # dim frames can only make the picture look smaller, so a dim *bigger* picture is real and a dim smaller one is not
@@ -298,3 +309,19 @@ def test_the_trigger_and_the_shortest_change_are_settings(world, monkeypatch):
     assert store.get(paths["Listed (2021).mkv"])["priority"] == PRIORITY_MEDIUM
     monkeypatch.setenv("DENSE_TRIGGER", "junk")  # not a number: the default
     assert trigger_changes() == TRIGGER_CHANGES
+
+
+def test_a_lopsided_crop_on_an_axis_the_picture_spans_is_still_usable():
+    # Everything Everywhere at 5826 s: a 1.85 shot with a dark side read as skew_x 1512 on a full-width crop, and every
+    # sample of the shot was thrown away. A crop that grew into a matte on one side is still thrown away.
+    from cih_analyzer.coarse import Sample
+    from cih_analyzer.dense import _usable
+
+    info = make_info()
+    seg = SegmentationParams()
+    dark_side = Sample(0.0, 0, 40, 3840, 2080, 32.0, skew=1512, skew_x=1512, skew_y=8)
+    assert _usable(dark_side, info, seg)
+    subtitle = Sample(0.0, 0, 272, 3840, 1700, 60.0, skew=84, skew_x=0, skew_y=84)
+    assert not _usable(subtitle, info, seg)  # grew down into the bottom matte: the height is in doubt
+    object_in_bar = Sample(0.0, 480, 0, 2880, 2160, 60.0, skew=300, skew_x=300, skew_y=0)
+    assert not _usable(object_in_bar, info, seg)  # a pillarboxed picture with something in a side bar

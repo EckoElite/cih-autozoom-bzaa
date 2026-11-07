@@ -11,9 +11,12 @@ search the first pass uses. What it keeps from the first pass: the ramps (gradua
 frame) and, where the dense measurements say nothing (credits on black, a dark scene), the first pass's own states.
 
 Guards against misreads, which matter more here than anywhere because every state is short:
-- a sample whose crop grew on one side only (a subtitle, a bright object in the matte) says nothing;
-- a state shorter than a second must be bright (a dark frame's crop looks like a smaller picture), must last
-  `min_frames` frames once its edges are found, and must show a scene cut at both edges;
+- a sample whose crop grew on one side only (a subtitle, a bright object in the matte) says nothing, unless the
+  picture already spans that axis end to end (a dark side of a full-width picture says nothing about its height);
+- a state shorter than a second must be bright (a dark frame's crop looks like a smaller picture) unless it is a
+  bigger picture than both neighbours, must last `min_frames` frames once its edges are found, and, unless it is
+  a bigger picture than both neighbours, must show a scene cut at both edges (the scene-cut test misses real cuts
+  in a fast montage, where every frame differs from the next);
 - a state that fails those is not followed: it goes to the neighbour with the bigger picture, so what is left
   over is a little extra black, never a picture too big for the screen.
 """
@@ -110,7 +113,12 @@ def _usable(s: Sample, info: VideoInfo, seg: SegmentationParams) -> bool:
         return False
     skew_x = s.skew if s.skew_x is None else s.skew_x
     skew_y = s.skew if s.skew_y is None else s.skew_y
-    return skew_x <= LOPSIDED * info.width and skew_y <= LOPSIDED * info.height
+    tol_x, tol_y = rect_tolerance(info)
+    # a crop lopsided across an axis the picture already spans end to end (a dark side of a full-width picture)
+    # cannot have grown into a matte on that axis, so the skew says nothing against the other axis
+    spans_x = s.w >= info.width - tol_x
+    spans_y = s.h >= info.height - tol_y
+    return (skew_x <= LOPSIDED * info.width or spans_x) and (skew_y <= LOPSIDED * info.height or spans_y)
 
 
 def _mode_rect(samples: list[Sample]) -> Rect:
@@ -299,9 +307,11 @@ def dense_pass(
             cut_edges = [
                 bounds[j].scene_cut for j in (i - 1, i) if 0 <= j < len(bounds) and bounds[j].kind == "cut"
             ]
-            if length < min_s - 1e-9 or (
-                length < FLASH_S and (doubtful or any(c is False for c in cut_edges))
-            ):
+            # a bigger picture with clean edges is a shot of its own whether or not the scene-cut test agrees: in a
+            # fast montage the test measures the change against its busy neighbourhood and misses real cuts. The
+            # test still guards a state that is not bigger (a dark scene or a matte flicker looks smaller, not bigger)
+            no_cut = any(c is False for c in cut_edges) and not bigger
+            if length < min_s - 1e-9 or (length < FLASH_S and (doubtful or no_cut)):
                 victim = i
                 break
         if victim is None:
