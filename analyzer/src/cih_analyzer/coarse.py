@@ -157,16 +157,22 @@ def coarse_scan(
     threads: int | None = None,
     timeout: float = SCAN_TIMEOUT_S,
     progress: Callable[[float], None] | None = None,
+    skip_frame: str = "nokey",
 ) -> list[Sample]:
     """Decode the keyframes of `path` and measure each. Raises ProbeError if ffmpeg fails or times out.
 
+    `skip_frame` is ffmpeg's decoder setting: `nokey` reads keyframes only (the coarse pass), `noref` reads every
+    reference frame (about every third frame of a typical film, which the dense pass uses with `min_interval_s=0`).
+
     `progress`, if given, is called about once a second with the share of the file's duration ffmpeg has reached."""
+    if skip_frame not in ("nokey", "noref", "none"):
+        raise ValueError(f"skip_frame must be nokey, noref or none, not {skip_frame!r}")
     exe = shutil.which("ffmpeg")
     if exe is None:
         raise ProbeError("ffmpeg not found on PATH")
     with tempfile.TemporaryDirectory(prefix="cih-coarse-") as scratch:
         progress_file = Path(scratch, "progress.txt")
-        cmd = [exe, "-nostdin", "-hide_banner", "-loglevel", "error", "-skip_frame", "nokey"]
+        cmd = [exe, "-nostdin", "-hide_banner", "-loglevel", "error", "-skip_frame", skip_frame]
         if progress:
             cmd += ["-nostats", "-progress", progress_file.as_posix()]
         if threads:

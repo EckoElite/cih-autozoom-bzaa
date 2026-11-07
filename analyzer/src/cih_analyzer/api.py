@@ -52,10 +52,12 @@ class AnalyzeBody(Target):
 
     source: str | None = None
     at: float | None = Field(default=None, ge=0, description="where the player is, in seconds")
-    mode: Literal["auto", "detailed"] = Field(
+    mode: Literal["auto", "detailed", "dense"] = Field(
         default="auto",
         description="manual requests only. auto: survey first (every SURVEY_INTERVAL seconds, or `survey_interval`), "
-        "then the detailed pass only if the picture changes. detailed: no survey, read every keyframe",
+        "then the detailed pass only if the picture changes. detailed: no survey, read every keyframe. dense: "
+        "follow every change however short (every reference frame is measured), starting from the stored result "
+        "when there is one",
     )
     survey_interval: float | None = Field(
         default=None,
@@ -236,6 +238,8 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
         options: dict[str, Any] = {}
         if manual and target.mode == "detailed":
             options["detailed"] = True
+        elif manual and target.mode == "dense":
+            options["dense"] = True
         elif manual and target.survey_interval:
             options["survey_interval"] = target.survey_interval
         answer: dict[str, Any] = {

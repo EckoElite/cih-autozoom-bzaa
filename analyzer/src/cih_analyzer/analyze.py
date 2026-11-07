@@ -16,6 +16,7 @@ from pathlib import Path
 
 from . import __version__
 from .coarse import coarse_scan, limit_for
+from .dense import DenseParams, dense_pass, result_from_timeline, wants_dense
 from .fingerprint import quick_hash
 from .known import is_known_variable
 from .probe import ProbeError, VideoInfo
@@ -32,6 +33,7 @@ from .schema import (
     Segment,
     Timeline,
     Video,
+    load_timeline,
 )
 from .segmentation import CoarseResult, SegmentationParams, segment_samples
 from .skip import SkipConfig, inspect_file
@@ -49,6 +51,9 @@ class Analysis:
     timeline: Timeline | None
     skip: str | None = None
     ramp_raw: tuple[dict, ...] = ()
+    wants_dense: bool = (
+        False  # the first pass found enough changes that the dense pass should follow every one
+    )
 
 
 def ramp_raw_of(result: RefineResult) -> tuple[dict, ...]:
@@ -70,6 +75,13 @@ def ramp_raw_of(result: RefineResult) -> tuple[dict, ...]:
         ]
         out.append({"start_frame": b.ramp[0].f, "frames": frames})
     return tuple(out)
+
+
+def _with_stored_raw(fresh: tuple[dict, ...], stored: list | None) -> tuple[dict, ...]:
+    """A dense pass that started from a stored result has the fitted ramps but not what was measured on their frames:
+    take that from the stored result, ramp by ramp (a ramp is told by its first frame)."""
+    by_start = {r["start_frame"]: r for r in stored or []}
+    return tuple(by_start.get(r["start_frame"], r) for r in fresh)
 
 
 def _video(info: VideoInfo) -> Video:
@@ -182,12 +194,18 @@ def analyze_file(
     progress: Callable[[str, float], None] | None = None,
     start_at: float = 0.0,
     on_partial: Callable[[dict], None] | None = None,
+    dense: bool = False,
+    base: dict | None = None,
 ) -> Analysis:
     """Analyze one file. Skipped files (ISO, 3D, extras, audio-only, broken) come back with a reason, not an error;
     anything else that goes wrong while decoding raises `ProbeError`.
 
     With `survey_interval_s` the file is first surveyed (one keyframe every that many seconds, found by seeking);
     a file that shows one picture throughout skips the detailed pass that reads every keyframe.
+
+    With `dense`, the dense pass (dense.py) follows the first pass: every reference frame is measured, so changes
+    shorter than the keyframe spacing are found and a stretch the first pass got wrong is corrected. `base` is a stored
+    first-pass result (`{"timeline": ..., "ramp_raw": ...}`) to start from instead of reading the file for it again.
 
     With `on_partial`, the survey starts at `start_at` (where a player is) and `on_partial(timeline)` is called with a
     provisional timeline as soon as the survey knows the stretch around it, and again as it learns more."""
@@ -197,6 +215,11 @@ def analyze_file(
         return Analysis(None, inspected.skip)
     info = inspected.info
     seg_params = seg_params or SegmentationParams()
+    if dense and base is not None:
+        stored = result_from_timeline(load_timeline(base["timeline"]), info)
+        result = dense_pass(path, info, stored, DenseParams(), progress=progress)
+        timeline = build_timeline(path, info, result, seg_params, display_path=display_path, plex=plex)
+        return Analysis(timeline, ramp_raw=_with_stored_raw(ramp_raw_of(result), base.get("ramp_raw")))
     scan_args = {} if sample_interval_s is None else {"min_interval_s": sample_interval_s}
     known = survey_interval_s is not None and is_known_variable(path, known_variable_file)
     surveying = (
@@ -255,5 +278,16 @@ def analyze_file(
             coarse = replace(coarse, flags=(*coarse.flags, "known_variable"))
         checking = stage("checking", start + read_share, 1.0 - start - read_share)
     result = refine(path, info, coarse, refine_params or RefineParams(), progress=checking)
+    wants = False
+    if dense:
+        result = dense_pass(
+            path,
+            info,
+            result,
+            DenseParams(),
+            progress=(lambda phase, share: progress(phase, 0.5 + 0.5 * share)) if progress else None,
+        )
+    else:
+        wants = wants_dense(len(result.boundaries)) or "mixed_probes" in result.flags
     timeline = build_timeline(path, info, result, seg_params, display_path=display_path, plex=plex)
-    return Analysis(timeline, ramp_raw=ramp_raw_of(result))
+    return Analysis(timeline, ramp_raw=ramp_raw_of(result), wants_dense=wants)

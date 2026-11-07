@@ -360,6 +360,14 @@ class Store:
             )
             return True
 
+    def needing_dense(self) -> list[dict]:
+        """Finished titles whose result did not come from the dense pass (its flags never say `dense`): the
+        scheduler picks from them the ones that should run it."""
+        return self._all(
+            "SELECT path, segments, flags FROM files WHERE status='done' AND timeline IS NOT NULL "
+            "AND COALESCE(flags, '') NOT LIKE '%dense%'"
+        )
+
     FORGETTABLE = ("done", "error", "queued", "idle")
 
     def forget(self, path: str) -> str:

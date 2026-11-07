@@ -103,6 +103,9 @@ class SegmentCheck:
     agreeing: int
     readable: int
     into_left: bool = True
+    mixed: bool = (
+        False  # a minority of probes showed a bigger picture: a shot at another ratio inside the segment
+    )
 
 
 def _tolerance(info: VideoInfo) -> float:
@@ -176,20 +179,52 @@ def probe_segment(
             found.append(_union(edges))
     if not found:
         return SegmentCheck("unreadable", seg.rect, 0, 0)
-    union = _union(found)
+    union, mixed = _consensus(found, tol)
     if _distance(union, seg.rect) <= tol:
-        return SegmentCheck("confirmed", union.rect, len(found), len(found))
+        return SegmentCheck("confirmed", union.rect, len(found), len(found), mixed=mixed)
     near_left = left is not None and _distance(union, left) <= tol
     near_right = right is not None and _distance(union, right) <= tol
     if near_left or near_right:
-        return SegmentCheck("refuted", union.rect, len(found), len(found), into_left=near_left)
+        return SegmentCheck("refuted", union.rect, len(found), len(found), into_left=near_left, mixed=mixed)
     bigger = _union([union, _rect_edges(seg.rect)])
     if _distance(union, bigger.rect) <= tol:
         # the probes show a larger picture than the coarse pass did (a dark scene had cropped it): take theirs
-        return SegmentCheck("corrected", union.rect, len(found), len(found))
+        return SegmentCheck("corrected", union.rect, len(found), len(found), mixed=mixed)
     # the probes show less than the coarse pass did (dark content, or a subtitle that stretched the crop): the
     # larger rectangle is the safe one, because a rectangle that is too small makes the picture too big for the screen
-    return SegmentCheck("confirmed", bigger.rect, len(found), len(found))
+    return SegmentCheck("confirmed", bigger.rect, len(found), len(found), mixed=mixed)
+
+
+def _consensus(found: list[Edges], tol: float) -> tuple[Edges, bool]:
+    """The picture the probes of a segment agree on, and whether a minority of them showed a bigger one.
+
+    The union of every probe is the safe rectangle for one picture seen through dark frames, but across a long segment
+    one probe that lands in a short shot at a bigger ratio would stretch the whole segment to it (a minute of 2.39
+    taken for 1.85 because one probe fell in a 1.85 shot). So the probes are grouped by the picture they show, and
+    the largest group's union is the segment's picture. A bigger picture that fewer than half the probes saw is a shot
+    at another ratio, not the segment's picture: it is reported (`mixed`) so the title can be given the dense pass,
+    which finds that shot and its exact frames. A bigger picture half the probes or more saw stays the segment's."""
+    groups: list[list[Edges]] = []
+    for e in found:
+        for g in groups:
+            if _distance(e, _rect_of_edges(g[0])) <= tol:
+                g.append(e)
+                break
+        else:
+            groups.append([e])
+    if len(groups) == 1:
+        return _union(found), False
+    main = max(groups, key=len)
+    main_union = _union(main)
+    bigger = [g for g in groups if g is not main and _union([main_union, *g]).rect != main_union.rect]
+    heavy = [g for g in bigger if 2 * len(g) >= len(found)]
+    if heavy:  # half the probes or more saw a bigger picture: the segment's picture is the biggest of them
+        return _union(found), False
+    return main_union, bool(bigger)
+
+
+def _rect_of_edges(e: Edges) -> Rect:
+    return e.rect
 
 
 def _display_aspect(rect: Rect, info: VideoInfo) -> float:
@@ -464,6 +499,7 @@ def refine(
 
     # 2. every surviving segment gets a full-resolution rectangle
     final = [check(i) for i in range(len(segments))]
+    mixed_probes = any(c.mixed for c in final)
     rects = [
         c.rect if c.verdict in ("confirmed", "corrected") else s.rect
         for s, c in zip(segments, final, strict=True)
@@ -536,6 +572,8 @@ def refine(
         flags.append("segments_refuted")
     if merged:
         flags.append("uncertain_merged")
+    if mixed_probes:
+        flags.append("mixed_probes")
     if any("placed_conservatively" in b.flags for b in refined):
         flags.append("position_uncertain")
     if len({(s.preset, round(s.aspect, 2) if s.preset is None else 0) for s in out}) > 1:

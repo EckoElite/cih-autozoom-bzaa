@@ -4,6 +4,8 @@ python -m cih_analyzer FILE...                  print the probe result or skip r
 python -m cih_analyzer --analyze FILE           print the timeline JSON for one file (reads the file, writes nothing)
 python -m cih_analyzer --analyze-envelope FILE  the same inside an envelope with the raw ramp measurements,
                                                 which is what the scheduler's worker processes print
+--dense                                         follow every change, however short (dense.py), after the first pass
+--base STORED.json                              with --dense: start from a stored envelope instead of the first pass
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from .skip import inspect_file
 USAGE = (
     "usage: python -m cih_analyzer [--analyze | --analyze-envelope] [--sample-interval SECONDS] "
     "[--survey-interval SECONDS] [--start-at SECONDS] [--progress-file PATH] [--partial-file PATH] "
-    "<file> [<file> ...]"
+    "[--dense] [--base PATH] <file> [<file> ...]"
 )
 
 
@@ -76,6 +78,21 @@ def main(argv: list[str]) -> int:
                 start_at = value
             else:
                 survey = value
+    dense = "--dense" in argv
+    argv = [a for a in argv if a != "--dense"]
+    base: dict | None = None
+    if "--base" in argv:
+        at = argv.index("--base")
+        if at + 1 >= len(argv):
+            print(USAGE, file=sys.stderr)
+            return 2
+        try:
+            with open(argv[at + 1], encoding="utf-8") as fh:
+                base = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print(f"cannot read the stored result: {exc}", file=sys.stderr)
+            return 2
+        argv = argv[:at] + argv[at + 2 :]
     for flag in ("--progress-file", "--partial-file"):
         if flag in argv:
             at = argv.index(flag)
@@ -102,6 +119,8 @@ def main(argv: list[str]) -> int:
                 progress=progress_writer(progress_path) if progress_path else None,
                 start_at=start_at,
                 on_partial=partial_writer(partial_path) if partial_path else None,
+                dense=dense,
+                base=base,
             )
         except Exception as exc:  # noqa: BLE001 - say what went wrong in one line, with an exit code of its own
             print(f"{type(exc).__name__}: {' '.join(str(exc).split())[:400]}", file=sys.stderr)
@@ -118,6 +137,7 @@ def main(argv: list[str]) -> int:
                         "version": __version__,
                         "timeline": json.loads(outcome.timeline.to_json()),
                         "ramp_raw": list(outcome.ramp_raw),
+                        "wants_dense": outcome.wants_dense,
                     },
                     ensure_ascii=False,
                 )

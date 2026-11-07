@@ -130,3 +130,12 @@ def test_a_running_skipped_or_unknown_title_is_left_alone(world):
     assert store.get(film)["status"] == "skipped"
     assert client.post("/api/v1/forget", json={"path": film + ".nope"}).status_code == 404
     assert client.post("/api/v1/forget", json={}).status_code == 422
+
+
+def test_a_hand_re_queue_can_ask_for_the_dense_pass(world, monkeypatch):
+    client, store, sched, film = world
+    capture_worker(monkeypatch)
+    sched.run_one()
+    r = client.post("/api/v1/analyze", json={"path": film, "source": "manual", "mode": "dense"})
+    assert r.status_code == 200 and r.json()["options"] == {"dense": True}
+    assert json.loads(store.get(film)["options"]) == {"dense": True}

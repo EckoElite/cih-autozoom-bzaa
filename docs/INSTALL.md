@@ -103,6 +103,32 @@ ahead of you; a film or episode that keeps one ratio gets its final timeline in 
 takes as long as the full pass, with the stretches the survey found steady already played at the right zoom meanwhile. Plex ids are matched to files by folder and file name when no `PATH_MAP` rule
 covers the Plex path. If files were already queued before `ON_DEMAND_ROOTS` was set (the first scan ran without it), the next scan puts the ones nobody asked for back to "on demand".
 
+**Titles that change ratio often: the dense pass.** The first pass reads about one keyframe a second, which is
+right for a film that changes ratio a few times and wrong for one that flips every second or two (a multiverse montage,
+a flashback). The dense pass reads every reference frame (about every third frame), measures the picture in each, and
+builds the film's states from those measurements, so a shot of a few frames is followed on its exact frames and a
+stretch the first pass misjudged is corrected. Ramps (gradual matte changes) are kept as the first pass measured
+them. It is slow: measured on a gaming PC reading a 4K remux over SMB, the full film (139 min) took 4 h 28 min, about 1.9 times its running time, on top of the first pass. The Unraid CPU has not been measured; expect it to be no faster. That is why it runs only for titles that need it, behind the first pass.
+
+It runs, once per title, for:
+
+| Title | When | Queue tier |
+|---|---|---|
+| on the known-variable list | in the same run as the first pass (a title already analysed is queued again once, starting from its stored result) | P3 Medium |
+| any title whose first pass found `DENSE_TRIGGER` (20) or more changes | after the first pass: the title is queued again, starting from the result just stored, so players have the first-pass timeline meanwhile | P2 High |
+| any title whose segment checks saw a bigger picture in a minority of their probes (flag `mixed_probes`: a short shot at another ratio) | the same | P2 High |
+| any title, by hand | **Analyze again** with Pass set to *dense (follow every change)* | P1 Highest |
+
+After an update, the next scan queues the titles already analysed that qualify (the known-variable list at P3, the
+titles with 20 or more changes at P2). A result that came from the dense pass says so (flag `dense`; the title's
+page shows "dense pass") and is not queued for it again.
+
+What keeps it from following misreads: a sample whose crop grew on one side only (a subtitle, a bright object in the
+matte) is ignored; a state shorter than a second must show a scene change at both of its edges and, unless it is a
+bigger picture than both neighbours, must be bright (a dark frame's crop looks like a smaller picture); a state
+shorter than `DENSE_MIN_FRAMES` frames is not followed. What fails those goes to the neighbour with the bigger
+picture, so a miss costs a little extra black and never a picture too big for the screen.
+
 **The queue and its priorities.** Titles a player is waiting for never queue: three express workers
 (`EXPRESS_WORKERS`) take them at once, even while analysis is paused, and a fourth waits in an express line ahead of
 the queue. Everything else is one queue in four tiers, taken in this order:
@@ -141,6 +167,8 @@ All settings are environment variables; change them by editing the container and
 | `ON_DEMAND_ROOTS` | | folders inside `/media` (`;` separated) analysed only when a player asks, for example `/media/tv` |
 | `EXPRESS_WORKERS` | `3` | extra workers that take only titles a player is waiting for; they run even while analysis is paused by hand (a re-queue made by hand does not count: it waits for Resume) |
 | `SURVEY_INTERVAL` | `8` | seconds between the places the quick first survey looks at (at least 2; `0` turns it off). A file that shows one picture throughout is finished by the survey; any other file gets the full pass. A short change that falls between two places, in a film that never changes otherwise, is missed |
+| `DENSE_TRIGGER` | `20` | how many ratio changes the first pass must find before a title also gets the dense pass (see below); `0` turns the automatic trigger off, and titles on the known-variable list always get it |
+| `DENSE_MIN_FRAMES` | `4` | the shortest change the dense pass follows, in frames (4 is about 0.17 s; at least 2) |
 | `KNOWN_VARIABLE_FILE` | | optional text file (for example `/config/known_variable.txt`), one `Title (Year)` per line, of extra films that change ratio; they skip the survey and get the full pass, like the titles bundled with the analyzer, and are queued ahead of recently added titles and the backlog (behind only titles asked for by hand or by a player) |
 | `SAMPLE_INTERVAL` | `1` | seconds between sampled keyframes in the full pass (at least 1) |
 | `SAMPLE_INTERVALS` | | per-folder overrides, `prefix=seconds;prefix=seconds` |

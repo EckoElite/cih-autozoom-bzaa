@@ -29,10 +29,12 @@ from typing import Protocol
 
 from . import __version__
 from .config import Settings, in_quiet_hours
+from .dense import trigger_changes
+from .known import is_known_variable
 from .pathmap import PathMap
 from .plex import PlexClient, PlexError, redact
 from .scanner import PlexSummary, ScanSummary, scan_media, sync_plex
-from .store import PRIORITY_HIGH, PRIORITY_PLAYER, Store
+from .store import PRIORITY_HIGH, PRIORITY_MEDIUM, PRIORITY_PLAYER, Store
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +54,7 @@ class RunResult:
     skip: str | None = None
     version: str = __version__
     error: str | None = None
+    wants_dense: bool = False  # the first pass found enough changes that the dense pass should follow
 
 
 class Runner(Protocol):
@@ -106,10 +109,14 @@ def subprocess_runner(
     survey_interval: float | None = None,
     start_at: float | None = None,
     on_partial: Callable[[dict], None] | None = None,
+    dense: bool = False,
+    base: dict | None = None,
 ) -> RunResult:
     """Analyse one file in a child process and parse the envelope it prints. `progress` is called about once a
     second with the worker's `{"phase", "fraction"}` while it runs. With `on_partial`, the worker surveys from
-    `start_at` (where a player is) and `on_partial(timeline)` gets each provisional timeline it produces."""
+    `start_at` (where a player is) and `on_partial(timeline)` gets each provisional timeline it produces. With
+    `dense`, the worker follows the first pass with the dense pass (dense.py); `base` is a stored first-pass
+    envelope (`{"timeline", "ramp_raw"}`) it starts from instead of reading the file again."""
     src = str(Path(__file__).resolve().parents[1])
     env = dict(os.environ)
     env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
@@ -127,6 +134,12 @@ def subprocess_runner(
             cmd += ["--progress-file", str(progress_file)]
         if on_partial is not None:
             cmd += ["--partial-file", str(partial_file), "--start-at", f"{start_at or 0.0:g}"]
+        if dense:
+            cmd += ["--dense"]
+            if base is not None:
+                base_file = Path(scratch, "base.json")
+                base_file.write_text(json.dumps(base, separators=(",", ":")), encoding="utf-8")
+                cmd += ["--base", str(base_file)]
         cmd += ["--analyze-envelope", path]
         return _run_worker(cmd, env, timeout, stop, progress, progress_file, partial_file, on_partial)
 
@@ -188,7 +201,10 @@ def _run_worker(
     if "skip" in data:
         return RunResult(skip=str(data["skip"]))
     return RunResult(
-        timeline=data["timeline"], ramp_raw=data.get("ramp_raw", []), version=data.get("version", __version__)
+        timeline=data["timeline"],
+        ramp_raw=data.get("ramp_raw", []),
+        version=data.get("version", __version__),
+        wants_dense=bool(data.get("wants_dense", False)),
     )
 
 
@@ -246,6 +262,7 @@ class Scheduler:
             survey = None
         else:
             survey = options.get("survey_interval") or self.settings.survey_interval_s
+        dense = self._dense_for(path, options)
         return subprocess_runner(
             path,
             timeout,
@@ -255,12 +272,40 @@ class Scheduler:
             progress=lambda latest: self._set_progress(path, latest),
             start_at=self._start_at.get(path),
             on_partial=lambda tl: self._set_provisional(path, tl),
+            dense=dense,
+            base=self._stored_base(path) if dense and options.get("dense") else None,
         )
+
+    def _dense_for(self, path: str, options: dict) -> bool:
+        """Whether this run follows the first pass with the dense pass: it was asked for (the trigger, or a hand
+        re-queue), the title is on the known-variable list, or its last result already came from the dense pass."""
+        if options.get("dense") or is_known_variable(path, self.settings.known_variable_file):
+            return True
+        row = self.store.get(path)
+        return bool(row and "dense" in (row.get("flags") or ""))
+
+    def _stored_base(self, path: str) -> dict | None:
+        """The stored first-pass result of an unchanged file, to start the dense pass from. None if there is none."""
+        row = self.store.get(path)
+        if not row or not row.get("timeline"):
+            return None
+        try:
+            stat = os.stat(path)
+            if (stat.st_size, stat.st_mtime) != (row["size"], row["mtime"]):
+                return None
+            return {
+                "timeline": json.loads(row["timeline"]),
+                "ramp_raw": json.loads(row.get("ramp_raw") or "[]"),
+            }
+        except (OSError, ValueError):
+            return None
 
     def _pass_used(self, path: str) -> str:
         """How the run of `path` is going, as JSON for the finished title's page: `{"pass": "detailed"}` (every keyframe
         read) or `{"pass": "survey", "interval": seconds}` (the survey, then the detailed pass where the picture changes)."""
         options = self._job_options.get(path, {})
+        if self._dense_for(path, options):
+            return json.dumps({"pass": "dense"})
         if options.get("detailed"):
             return json.dumps({"pass": "detailed"})
         interval = options.get("survey_interval") or self.settings.survey_interval_s
@@ -465,6 +510,11 @@ class Scheduler:
                 now=self.clock(),
                 ran=ran,
             )
+            if result.wants_dense and "dense" not in ran:
+                # the first pass found enough changes to follow every one of them: the dense pass runs next, at High,
+                # starting from the result just stored
+                self.store.requeue(path, PRIORITY_HIGH, self.clock(), options=json.dumps({"dense": True}))
+                log.info("%s changes ratio often: queued for the dense pass", path)
         else:
             self.store.fail(path, "the analysis returned nothing")
         return True
@@ -520,11 +570,30 @@ class Scheduler:
                 known_variable_file=self.settings.known_variable_file,
             )
         self.last_scan = {"at": self.clock(), **summary.__dict__}
+        queued = self.queue_dense()
+        if queued:
+            log.info("%d finished title(s) queued for the dense pass", queued)
         log.info(
             "scan: %d seen, %d new, %d changed, %d moved up (known variable), %d missing, %d errors",
             summary.seen, summary.new, summary.changed, summary.raised, summary.missing, len(summary.errors),
         )  # fmt: skip
         return summary
+
+    def queue_dense(self) -> int:
+        """Queue finished titles whose result did not come from the dense pass but should: titles on the
+        known-variable list (Medium) and titles whose result has DENSE_TRIGGER or more changes (High). Each runs once;
+        a result from the dense pass is never queued for it again."""
+        queued = 0
+        trigger = trigger_changes()
+        for row in self.store.needing_dense():
+            many = trigger > 0 and (row["segments"] or 0) - 1 >= trigger
+            listed = is_known_variable(row["path"], self.settings.known_variable_file)
+            if not (many or listed):
+                continue
+            tier = PRIORITY_HIGH if many else PRIORITY_MEDIUM
+            if self.store.requeue(row["path"], tier, self.clock(), options=json.dumps({"dense": True})):
+                queued += 1
+        return queued
 
     def plex_now(self) -> PlexSummary | None:
         if not self.plex:
