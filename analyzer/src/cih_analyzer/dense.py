@@ -32,7 +32,7 @@ from pathlib import Path
 
 from .coarse import Sample, coarse_scan
 from .frames import Edges
-from .geometry import EQUIVALENT_ZOOM, picture_zoom
+from .geometry import EQUIVALENT_ZOOM, picture_zoom, same_zoom
 from .probe import VideoInfo
 from .ramps import FitFrame
 from .refine import (
@@ -53,6 +53,7 @@ from .segmentation import (
     snap_aspect,
     unusable_reason,
 )
+from .survey import MIN_PICTURE_AREA
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +111,11 @@ class _Run:
 
 def _usable(s: Sample, info: VideoInfo, seg: SegmentationParams) -> bool:
     if unusable_reason(s, info, seg) is not None:
+        return False
+    # a crop under half the frame is content on black (an X-ray, a web page, credits text), not a picture: the first
+    # pass ignores it for the same reason, and a state is not worth following when it would enlarge a window of
+    # content up to the full band
+    if s.w * s.h < MIN_PICTURE_AREA * info.width * info.height:
         return False
     skew_x = s.skew if s.skew_x is None else s.skew_x
     skew_y = s.skew if s.skew_y is None else s.skew_y
@@ -304,6 +310,15 @@ def dense_pass(
                 _zoom(r.rect, info) < _zoom(n.rect, info) / (1 + EQUIVALENT_ZOOM) for n in neighbours
             )
             doubtful = dim and not bigger
+            # a brief state a hair different from the picture on both sides of it (2.35 against 2.39 as a dim frame
+            # flickers) is not worth a change; it goes into the neighbour with the bigger picture, so what it costs
+            # is a sliver of black, never light past the screen
+            flicker = (
+                len(neighbours) == 2
+                and all(same_zoom(_zoom(r.rect, info), _zoom(n.rect, info)) for n in neighbours)
+                and same_zoom(_zoom(neighbours[0].rect, info), _zoom(neighbours[1].rect, info))
+                and min(_zoom(n.rect, info) for n in neighbours) <= _zoom(r.rect, info)
+            )
             cut_edges = [
                 bounds[j].scene_cut for j in (i - 1, i) if 0 <= j < len(bounds) and bounds[j].kind == "cut"
             ]
@@ -311,7 +326,7 @@ def dense_pass(
             # fast montage the test measures the change against its busy neighbourhood and misses real cuts. The
             # test still guards a state that is not bigger (a dark scene or a matte flicker looks smaller, not bigger)
             no_cut = any(c is False for c in cut_edges) and not bigger
-            if length < min_s - 1e-9 or (length < FLASH_S and (doubtful or no_cut)):
+            if length < min_s - 1e-9 or (length < FLASH_S and (doubtful or no_cut or flicker)):
                 victim = i
                 break
         if victim is None:

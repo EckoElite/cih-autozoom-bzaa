@@ -13,6 +13,7 @@ from cih_analyzer.analyze import analyze_file, build_timeline
 from cih_analyzer.coarse import coarse_scan
 from cih_analyzer.config import Settings
 from cih_analyzer.dense import TRIGGER_CHANGES, dense_pass, result_from_timeline
+from cih_analyzer.geometry import picture_zoom, same_zoom
 from cih_analyzer.pathmap import PathMap
 from cih_analyzer.probe import probe_video
 from cih_analyzer.refine import refine
@@ -78,6 +79,27 @@ class TestDensePass:
         result = dense_pass(path, info, base)
         assert [s.rect for s in result.segments] == [SCOPE, WIDE, SCOPE]
         assert [b.frame for b in result.boundaries] == [830, 845]
+
+    def test_content_on_black_is_not_a_picture_to_follow(self, tmp_path):
+        # an X-ray, a web page or credits text on black is a crop under half the frame; following it would enlarge a
+        # window of content up to the full band (Everything Everywhere at 5122 s: a 1.4 s state at 2.7 times)
+        window = (160, 110, 320, 140)
+        path = video(tmp_path, "window.mp4", [(830, SCOPE, 110), (40, window, 200), (630, SCOPE, 110)])
+        info, base = first_pass(path)
+        result = dense_pass(path, info, base)
+        assert [s.rect for s in result.segments] == [SCOPE]
+
+    def test_a_brief_state_a_hair_different_from_the_picture_around_it_is_not_followed(self, tmp_path):
+        # a picture 2.8% narrower than scope: within the 3% the player treats as the same zoom, even with a clean change at both
+        # edges (a dim frame's crop flickering by a few rows)
+        near = (9, SCOPE[1], W - 18, SCOPE[3])
+        info = make_info(width=W, height=H)
+        assert same_zoom(picture_zoom(near, info), picture_zoom(SCOPE, info))
+        assert picture_zoom(near, info) >= picture_zoom(SCOPE, info)
+        path = video(tmp_path, "hair.mp4", [(830, SCOPE, 110), (10, near, 150), (660, SCOPE, 110)])
+        info, base = first_pass(path)
+        result = dense_pass(path, info, base)
+        assert [s.rect for s in result.segments] == [SCOPE]
 
     def test_a_dim_shot_that_looks_smaller_is_not_followed_but_a_dim_bigger_one_is(self, tmp_path):
         # dim frames can only make the picture look smaller, so a dim *bigger* picture is real and a dim smaller one is not
