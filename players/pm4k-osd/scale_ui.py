@@ -159,7 +159,7 @@ def scale_control(control: ET.Element, top_level: bool, parent_width: float | No
         if tag == "height" and is_text:
             continue  # text keeps its size, so its box keeps its height (a shorter one would clip the glyphs)
         relative = element.text.strip().endswith("r")
-        if tag == "posx" and parent_width and not relative:
+        if tag in ("posx", "left") and parent_width and not relative:
             if keeps_width:
                 continue  # spans its parent: leave it where it is
             new_w = (width0 or 0.0) if keep_text_width else (width0 or 0.0) * SCALE
@@ -222,12 +222,29 @@ def scale_slide(node: ET.Element) -> None:
             node.set("start", ",".join(new))
 
 
+def scale_zoom_rect(node: ET.Element) -> None:
+    """a zoom between two rectangles (x,y,w,h in window coordinates): map each like a top-level control"""
+    for attr in ("start", "end"):
+        value = node.get(attr)
+        if not value or value.count(",") != 3:
+            continue
+        try:
+            x, y, w, h = (float(part) for part in value.split(","))
+        except ValueError:
+            continue
+        node.set(attr, ",".join(fmt(v) for v in (anchored_x(x, w, w * SCALE, 1920.0), TOP_OFFSET + y * SCALE, w * SCALE, h * SCALE)))
+
+
 def scale_animation(anim: ET.Element) -> None:
     if anim.get("effect") == "slide":
         scale_slide(anim)
+    elif anim.get("effect") == "zoom":
+        scale_zoom_rect(anim)
     for effect in anim.findall("effect"):
         if effect.get("type") == "slide":
             scale_slide(effect)
+        elif effect.get("type") == "zoom":
+            scale_zoom_rect(effect)
 
 
 # per-page nudges after scaling: (control id, rows to move it up). The cast row on the movie page would otherwise end
