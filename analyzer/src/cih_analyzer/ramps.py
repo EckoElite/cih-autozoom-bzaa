@@ -18,6 +18,7 @@ monotone curve to the measurements. From that:
 
 from __future__ import annotations
 
+import math
 import statistics
 from dataclasses import dataclass, field, replace
 from typing import Literal
@@ -35,6 +36,11 @@ DRIFT_PX = 1.0  # most the picture edge may drift between the two halves of a wi
 SCENE_CUT_MIN_DIFF = 6.0
 SCENE_CUT_RATIO = 4.0
 SMOOTHING_WINDOWS = (7, 5, 3, 1)
+JUMP_FROM = 0.1  # a cut: progress is below this before it ...
+JUMP_TO = 0.9  # ... and above this on the very next frame ...
+JUMP_HOLD = 0.85  # ... and stays above this for the frames that follow
+JUMP_FRAMES = 8  # how many readable frames either side have to agree
+JUMP_MIN_FRAMES = 3  # and at least this many (a window that ends at the cut says nothing)
 
 # A matte that opens or closes in post is animated by a formula: constant speed, or an ease in and out. When the
 # measured edge follows one of those curves closely, the curve is a better description of the ramp than the
@@ -283,6 +289,25 @@ def _progress(frames: list[ScanFrame], name: str, a: float, b: float, snap: floa
     return out
 
 
+def _jump_cut(bar: list[float | None]) -> int | None:
+    """Index of the first frame after a change that goes from the old picture to the new one in a single frame and
+    holds there, or None. A ramp never covers most of its distance in one frame; a cut does, and in a dim shot the
+    settled edge then reads a pixel or two either side of the new position, which pooled into a ramp as long as that
+    flicker lasted when only the monotone fit was asked (Everything Everywhere at 2576 s, 2634 s and 5583 s)."""
+    seen = [i for i, v in enumerate(bar) if v is not None]
+    for k in range(1, len(seen)):
+        i, j = seen[k - 1], seen[k]
+        if j != i + 1 or bar[i] > JUMP_FROM or bar[j] < JUMP_TO:  # type: ignore[operator]
+            continue  # (a change across unreadable frames is placed by the caller from the biggest picture change)
+        before = [bar[x] for x in seen[max(0, k - JUMP_FRAMES) : k]]
+        after = [bar[x] for x in seen[k : k + JUMP_FRAMES]]
+        if len(before) < JUMP_MIN_FRAMES or len(after) < JUMP_MIN_FRAMES:
+            continue
+        if all(v <= JUMP_FROM for v in before) and all(v >= JUMP_HOLD for v in after):  # type: ignore[operator]
+            return j
+    return None
+
+
 def _isotonic_series(values: list[float | None]) -> list[float | None]:
     idx = [i for i, v in enumerate(values) if v is not None]
     fitted = isotonic_increasing([values[i] for i in idx])  # type: ignore[misc]
@@ -460,9 +485,19 @@ def _analyze(
     if not names or not frames:
         return Transition("none", 0, flags=("no_change",), confidence=0.0)
     q: dict[str, list[float | None]] = {}
+    raw: list[list[float | None]] = []
     for n in names:
         p = _progress(frames, n, getattr(old, n), getattr(new, n), params.snap_px)
+        raw.append(p)
         q[n] = _isotonic_series(_running_median(p, params.median_window))
+    if not from_cut:
+        bar = []
+        for i in range(len(frames)):
+            vals = [r[i] for r in raw if r[i] is not None]
+            bar.append(sum(vals) / len(vals) if vals else None)  # type: ignore[arg-type]
+        jump = _jump_cut(bar)
+        if jump is not None:
+            return Transition("cut", jump, scene_cut=_scene_cut(frames, jump), confidence=1.0)
     qbar: list[float | None] = []
     for i in range(len(frames)):
         vals = [q[n][i] for n in names if q[n][i] is not None]
@@ -513,6 +548,7 @@ def _ramp(
     fitted: dict[str, list[float]] = {}
     ok = True
     patterns: list[str] = []
+    fits: list[PatternFit] = []
     misread = [
         f.edges is None for f in span
     ]  # unreadable, or an outlier among its neighbours (a flash frame)
@@ -524,6 +560,7 @@ def _ramp(
             if pattern is not None:
                 fitted[n] = [a + (b - a) * v for v in _strictly_between(pattern.values)]
                 patterns.append(pattern.model)
+                fits.append(pattern)
                 for i in pattern.exceptions:
                     misread[i] = True
                 continue
@@ -536,6 +573,17 @@ def _ramp(
             ok = ok and good
         else:
             fitted[n] = [(a + b) / 2] * len(span)
+    if fits and len(fits) == len(names):
+        # every moving edge follows a curve: the ramp is where the curves move, not the whole stretch of window that
+        # was fitted (the frames before it and after it sit at the old and new edges and only add table entries)
+        lo = max(0, min(math.floor(f.start) for f in fits))
+        hi = min(len(span), max(math.ceil(f.start + f.length) for f in fits))
+        if hi - lo >= params.min_ramp_frames:
+            fitted = {n: v[lo:hi] for n, v in fitted.items()}
+            misread = misread[lo:hi]
+            end = start + hi
+            start += lo
+            span = frames[start:end]
     first_frame = round(span[0].t * fps)
     unreadable = sum(misread)
     out = tuple(

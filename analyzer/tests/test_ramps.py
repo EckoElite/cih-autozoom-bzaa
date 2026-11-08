@@ -296,3 +296,18 @@ def test_fit_pattern_needs_enough_frames_and_a_close_fit():
     assert fit is not None and fit.model == "linear" and fit.rms_px < 0.5
     jumpy = [0.0, 0.0, 0.0, 0.9, 0.9, 0.9, 1.0, 1.0, 1.0, 1.0]
     assert fit_pattern(jumpy, 200.0) is None
+
+
+def test_a_hard_cut_into_a_dim_shot_whose_edge_flickers_is_a_cut_not_a_ramp():
+    """4K, 40 to 274 rows: the settled edge reads 272 to 275 from frame to frame. Frames a pixel or two short of the
+    new edge used to pool every earlier arrived frame down with them, turning the cut into a ramp as long as the
+    flicker lasted (Everything Everywhere at 2576 s, 2634 s and 5583 s)."""
+    flicker = [274] * 20 + [272, 274, 272, 274, 272, 274, 272] + [274] * 20  # a stretch where it reads 2 px short
+    tops = [40] * 40 + flicker
+    frames = [
+        ScanFrame(i / FPS, Edges(top=t, bottom=2160 - t, left=0, right=3840), None) for i, t in enumerate(tops)
+    ]
+    old = Edges(top=40, bottom=2120, left=0, right=3840)
+    new = Edges(top=274, bottom=1886, left=0, right=3840)
+    result = analyze_transition(frames, old, new, FPS)
+    assert (result.kind, result.first_new) == ("cut", 40)
