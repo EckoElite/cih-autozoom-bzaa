@@ -75,7 +75,9 @@ class ScanFrame:
     mean: float | None = (
         None  # mean luma of the whole frame on the 8-bit scale (a dark frame cannot be trusted)
     )
-    fine: Edges | None = None  # the same edges to a fraction of a pixel (see `fine_edges`); only when asked for
+    fine: Edges | None = (
+        None  # the same edges to a fraction of a pixel (see `fine_edges`); only when asked for
+    )
 
 
 def _largest_block(flags: np.ndarray, max_gap: int) -> tuple[int, int] | None:
