@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import PurePath
 
-from .probe import NoVideoStream, ProbeError, VideoInfo, probe_video
+from .probe import NoVideoStream, ProbeError, VideoInfo, probe_video, truncated_matroska
 
 VIDEO_EXTENSIONS = frozenset(
     {
@@ -107,6 +107,9 @@ def inspect_file(path: str, config: SkipConfig = SkipConfig()) -> InspectResult:
     reason = path_skip_reason(path, config)
     if reason:
         return InspectResult(None, reason)
+    cut = truncated_matroska(path)
+    if cut:
+        return InspectResult(None, f"broken: {cut}")
     try:
         info = probe_video(path)
     except NoVideoStream:

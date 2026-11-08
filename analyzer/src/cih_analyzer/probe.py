@@ -12,6 +12,7 @@ Design points (docs/AUDIT_1.md, DD12 to DD16):
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from collections.abc import Iterable
@@ -20,6 +21,11 @@ from fractions import Fraction
 from pathlib import Path
 
 PROBE_TIMEOUT_S = 90.0
+EBML_MAGIC = bytes.fromhex("1a45dfa3")
+SEGMENT_ID = bytes.fromhex("18538067")
+TRUNCATION_SLACK = (
+    1 << 20
+)  # a Matroska file may be this much shorter than its header says before it counts as cut short
 VFR_TOLERANCE = 0.005
 INTERLACED_ORDERS = {"tt", "bb", "tb", "bt"}
 
@@ -30,6 +36,41 @@ class ProbeError(Exception):
 
 class NoVideoStream(ProbeError):
     """The file has no video stream other than attached pictures (an audio-only file)."""
+
+
+def truncated_matroska(path: str | os.PathLike[str]) -> str | None:
+    """A message if `path` is a Matroska file shorter than its own header says (an interrupted copy or download), else
+    None. Such a file has lost its seek index (the Cues sit at the end), so every seek into it reads the file from the
+    start: a survey of a feature film takes days instead of minutes, and a player cannot seek in it either."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            head = f.read(4096)
+    except OSError:
+        return None
+    if not head.startswith(EBML_MAGIC):
+        return None
+    at = head.find(SEGMENT_ID)  # the Segment element holds everything else
+    if at < 0 or at + 5 > len(head):
+        return None
+    first = head[at + 4]
+    length = 1
+    while length <= 8 and not first & (0x80 >> (length - 1)):
+        length += 1
+    if length > 8 or at + 4 + length > len(head):
+        return None
+    value = first & ((0x80 >> (length - 1)) - 1)
+    for b in head[at + 5 : at + 4 + length]:
+        value = (value << 8) | b
+    if value == (1 << (7 * length)) - 1:  # all ones: size not known (a file written live), nothing to compare
+        return None
+    declared = at + 4 + length + value
+    if size + TRUNCATION_SLACK >= declared:
+        return None
+    return (
+        f"file is cut short: {size:,} bytes on disk, its header says {declared:,} "
+        f"({(declared - size) / 1e9:.2f} GB missing, including the seek index); replace it with a complete copy"
+    )
 
 
 @dataclass(frozen=True)
