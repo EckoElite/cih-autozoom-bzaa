@@ -347,3 +347,23 @@ def test_a_lopsided_crop_on_an_axis_the_picture_spans_is_still_usable():
     assert not _usable(subtitle, info, seg)  # grew down into the bottom matte: the height is in doubt
     object_in_bar = Sample(0.0, 480, 0, 2880, 2160, 60.0, skew=300, skew_x=300, skew_y=0)
     assert not _usable(object_in_bar, info, seg)  # a pillarboxed picture with something in a side bar
+
+
+@NEEDS_FFMPEG
+def test_a_short_steep_ramp_is_kept_as_a_ramp_not_stored_as_intermediate_states(tmp_path):
+    """A matte that closes over 15 frames between two keyframes: the reference frames see a few pictures part-way
+    between the two ratios. They are not shots, and the stored timeline must follow the matte frame by frame."""
+    ramp = opening(15, lambda p: p, a=WIDE, b=SCOPE)
+    segs = [Seg(33.0, WIDE, level=110), Seg(15 / FPS, ramp, level=110), Seg(8.0, SCOPE, level=110)]
+    path = make_video(tmp_path / "steep.mp4", segs, keyint=50)
+    info, base = first_pass(path)
+    # a first pass that found the change but stored it as a plain cut (as the real one did, a second late)
+    from dataclasses import replace
+
+    cut = [replace(b, kind="cut", ramp=(), t_start=b.t) for b in base.boundaries]
+    result = dense_pass(path, info, replace(base, boundaries=tuple(cut)))
+    ramps = [b for b in result.boundaries if b.kind == "ramp"]
+    assert len(ramps) == 1 and 12 <= len(ramps[0].ramp) <= 17
+    assert [s.rect for s in result.segments] == [WIDE, SCOPE]
+    tops = [f.fitted.top for f in ramps[0].ramp]
+    assert all(a < b for a, b in zip(tops, tops[1:], strict=False))

@@ -72,6 +72,9 @@ HOLE_S = (
     1.5  # between two samples further apart than this the dense pass has no say about where the change is
 )
 RAMP_PAD_S = 0.2  # samples this close to a ramp are part of it
+RAMP_RUN_MAX_S = 0.6  # a run longer than this is a shot, not a step of a ramp
+RAMP_MAX_RUNS = 8  # most intermediate states one ramp is looked for across
+RAMP_ATTEMPTS = 2  # refinements spent on one stretch of intermediate states
 TRUST = 0.7  # confidence a refined boundary needs to be used as it is
 
 
@@ -252,11 +255,59 @@ def dense_pass(
                 return b
         return None
 
+    found_ramps: dict[tuple[int, int], RefinedBoundary] = {}
+
+    def ramp_ok(found: RefinedBoundary, left: _Run, right: _Run) -> bool:
+        if found.kind != "ramp" or not found.ramp or found.confidence < TRUST or "unresolved" in found.flags:
+            return False
+        wide = (4 * tol[0], 4 * tol[1])
+        return rects_close(found.ramp[0].fitted.rect, left.rect, wide) and rects_close(
+            found.ramp[-1].fitted.rect, right.rect, (2 * tol[0], 2 * tol[1])
+        )
+
+    def intermediate_chain(i: int, j: int) -> bool:
+        """runs[i..j] step monotonically from runs[i - 1] to runs[j + 1], each briefly: the shape of a matte in motion
+        seen through reference frames, which reads as a run of short states each a step further along."""
+        zooms = [_zoom(r.rect, info) for r in runs[i - 1 : j + 2]]
+        if same_zoom(zooms[0], zooms[-1]):
+            return False
+        sign = 1.0 if zooms[-1] > zooms[0] else -1.0
+        if any(sign * (b - a) < -EQUIVALENT_ZOOM * a for a, b in zip(zooms, zooms[1:], strict=False)):
+            return False
+        return all(r.last - r.first <= RAMP_RUN_MAX_S for r in runs[i : j + 1])
+
+    def take_ramps() -> None:
+        """A change the dense pass would store as a short intermediate state (or a few) is often a matte moving over
+        a handful of frames. Where the frames between the picture before and the picture after show a ramp, the
+        intermediate states go and the ramp is kept, fitted frame by frame."""
+        i = 1
+        while i < len(runs) - 1:
+            left = runs[i - 1]
+            ends = [
+                j
+                for j in range(i, min(len(runs) - 1, i + RAMP_MAX_RUNS))
+                if runs[j + 1].first - left.last <= HOLE_S and intermediate_chain(i, j)
+            ]
+            for j in sorted(ends, reverse=True)[:RAMP_ATTEMPTS]:
+                right = runs[j + 1]
+                found = refine_boundary(
+                    path, info, BoundaryWindow(left.last, right.first), left.rect, right.rect, params.refine,
+                    floor=left.first, ceiling=right.last, threshold=threshold,
+                )  # fmt: skip
+                if ramp_ok(found, left, right):
+                    found_ramps[(id(left), id(right))] = found
+                    del runs[i : j + 1]  # runs[i] is now `right`, the next picture's left neighbour
+                    break
+            i += 1
+
+    take_ramps()
     done = [0]
     total = max(1, len(runs) - 1)
 
     def boundary_between(left: _Run, right: _Run) -> RefinedBoundary:
         lo, hi = left.last, right.first
+        if (id(left), id(right)) in found_ramps:
+            return found_ramps[(id(left), id(right))]
         k = ramp_between(lo, hi)
         if k is not None:
             rb = base.boundaries[k]
