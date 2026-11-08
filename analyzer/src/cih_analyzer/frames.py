@@ -75,6 +75,7 @@ class ScanFrame:
     mean: float | None = (
         None  # mean luma of the whole frame on the 8-bit scale (a dark frame cannot be trusted)
     )
+    fine: Edges | None = None  # the same edges to a fraction of a pixel (see `fine_edges`); only when asked for
 
 
 def _largest_block(flags: np.ndarray, max_gap: int) -> tuple[int, int] | None:
@@ -109,6 +110,62 @@ def measure_edges(luma: np.ndarray, threshold: float) -> Edges | None:
     ) > max(8.0, LOPSIDED * width)
     return Edges(
         top=margin_y, bottom=height - margin_y, left=margin_x, right=width - margin_x, lopsided=lopsided
+    )
+
+
+FINE_REACH_PX = 40  # how far from the thresholded edge the steepest step is looked for
+FINE_MIN_STEP = 4.0  # native luma levels: a step weaker than this is noise, and the thresholded edge is kept
+FINE_INSET = 0.125  # the profile is averaged over the middle of the picture, this share in from each side
+
+
+def _step_edge(profile: np.ndarray, near: float, rising: bool) -> float | None:
+    """Position (in pixels, fractional) of the steepest brightness step in `profile` within FINE_REACH_PX of
+    `near`: the centre of mass of the step's gradient, so a blurred edge or a dim one that the threshold only
+    catches a few rows late is still placed where the brightness actually changes. `rising` is a dark-to-bright
+    step along the profile (a top or left edge); falling is a bottom or right edge. None when there is no clear step."""
+    n = profile.size
+    lo = int(max(0, near - FINE_REACH_PX))
+    hi = int(min(n - 1, near + FINE_REACH_PX))
+    if hi - lo < 4:
+        return None
+    grad = np.diff(profile[lo : hi + 1].astype(np.float64))  # grad[k] = profile[lo+k+1] - profile[lo+k]
+    if not rising:
+        grad = -grad
+    peak = int(np.argmax(grad))
+    if grad[peak] < FINE_MIN_STEP:
+        return None
+    ks = np.arange(max(0, peak - 2), min(grad.size, peak + 3))
+    weight = np.clip(grad[ks], 0.0, None)
+    if weight.sum() <= 0:
+        return None
+    return float(lo + 1 + (ks * weight).sum() / weight.sum())
+
+
+def fine_edges(luma: np.ndarray, edges: Edges) -> Edges:
+    """`edges` to a fraction of a pixel. Each edge is the steepest brightness step near the thresholded one, read
+    from rows (or columns) averaged over the middle of the picture; an edge with no clear step keeps its thresholded
+    position. The coordinates share their convention with the thresholded edges only up to a constant offset (a
+    dim picture edge reads a few rows late against the threshold), so a fine value is only ever compared with other
+    fine values of the same edge, never with a thresholded one."""
+    height, width = luma.shape
+    x0 = int(edges.left + FINE_INSET * (edges.right - edges.left))
+    x1 = int(edges.right - FINE_INSET * (edges.right - edges.left))
+    y0 = int(edges.top + FINE_INSET * (edges.bottom - edges.top))
+    y1 = int(edges.bottom - FINE_INSET * (edges.bottom - edges.top))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return edges
+    rows = luma[:, x0:x1:2].mean(axis=1)
+    cols = luma[y0:y1:2, :].mean(axis=0)
+    top = _step_edge(rows, edges.top, True)
+    bottom = _step_edge(rows, edges.bottom, False)
+    left = _step_edge(cols, edges.left, True)
+    right = _step_edge(cols, edges.right, False)
+    return Edges(
+        top=edges.top if top is None else top,
+        bottom=edges.bottom if bottom is None else bottom,
+        left=edges.left if left is None else left,
+        right=edges.right if right is None else right,
+        lopsided=edges.lopsided,
     )
 
 
@@ -260,17 +317,19 @@ def scan_edges(
     threshold: float,
     diff_rect: tuple[int, int, int, int] | None = None,
     step: float | None = None,
+    fine: bool = False,
     timeout: float = FRAME_TIMEOUT_S,
 ) -> list[ScanFrame]:
     """Measure every frame (or one per `step` seconds) in [start, start + duration) at full resolution.
 
+    `fine=True` also measures each frame's edges to a fraction of a pixel (`ScanFrame.fine`).
     `threshold` is on the 8-bit luma scale. `diff_rect` is the region used for the frame-to-frame difference (it
     should lie inside the picture in both states, so a changing matte does not register as a scene change).
     """
     _, depth = _luma_dtype(info)
     native = threshold * (1 << (depth - 8))
     shrink = float(1 << (depth - 8))
-    measured: list[tuple[Edges | None, float | None, float]] = []
+    measured: list[tuple[Edges | None, float | None, float, Edges | None]] = []
     previous: list[np.ndarray] = []
 
     def measure(luma: np.ndarray) -> None:
@@ -282,14 +341,15 @@ def scan_edges(
             if a.size:
                 diff = float(np.abs(a - b).mean()) / shrink
         mean = float(luma[::8, ::8].mean()) / shrink
-        measured.append((measure_edges(luma, native), diff, mean))
+        edges = measure_edges(luma, native)
+        measured.append((edges, diff, mean, fine_edges(luma, edges) if fine and edges is not None else None))
         previous[:] = [luma]
 
     times = _stream_luma(path, info, start, duration, step, measure, timeout)
     frames: list[ScanFrame] = []
-    for i, (edges, diff, mean) in enumerate(measured):
+    for i, (edges, diff, mean, fine_found) in enumerate(measured):
         t = times[i] if i < len(times) else (frames[-1].t + 1 / info.fps if frames else start)
         if frames and t <= frames[-1].t + 1e-6:
             continue  # a decoder can flush its last frames with one repeated timestamp; they add nothing
-        frames.append(ScanFrame(t, edges, diff, mean))
+        frames.append(ScanFrame(t, edges, diff, mean, fine_found))
     return frames

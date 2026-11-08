@@ -231,3 +231,68 @@ def test_reference_edges_report_whether_the_picture_holds_still():
     assert reference_edges(moving, head=True, stable_s=1.0)[1] is False
     dark = frames_for([None] * 40)
     assert reference_edges(dark, head=False, stable_s=1.0) == (None, False)
+
+
+def frames_with_fine(truth, measured, *, lead=40, tail=40):
+    """ScanFrames whose thresholded edges are `measured` (integers, noisy) and whose sub-pixel edges are `truth`."""
+    out = []
+    values = [(46.0, 46)] * lead + list(zip(truth, measured, strict=True)) + [(0.0, 0)] * tail
+    for i, (fine_top, top) in enumerate(values):
+        edges = Edges(top=top, bottom=360 - top, left=0, right=640)
+        fine = Edges(top=fine_top + 0.4, bottom=360 - fine_top - 0.4, left=0, right=640)
+        out.append(ScanFrame(i / FPS, edges, None, None, fine))
+    return out
+
+
+def test_a_steep_ramp_is_not_read_as_misreads_at_its_ends():
+    """A matte that closes 6 px a frame: the running median of a window cut off at the end of the ramp sits two frames
+    away from the frame itself, which used to make the first and last frames of the ramp outliers."""
+    result = analyze_transition(frames_for([46] * 40 + linear(8) + [0] * 40), OLD, NEW, FPS)
+    assert result.kind == "ramp"
+    assert all(f.readable for f in result.ramp)
+    assert result.confidence == 1.0 and "low_confidence" not in result.flags
+
+
+def test_a_constant_speed_matte_is_played_back_at_constant_speed_despite_noisy_measurements():
+    n = 15
+    truth = [46 - 46 * (k + 0.5) / (n + 0.5) for k in range(n)]
+    rng = random.Random(3)
+    measured = [round(t + rng.uniform(-2.5, 2.5)) for t in truth]
+    result = analyze_transition(frames_with_fine(truth, measured), OLD, NEW, FPS)
+    assert result.kind == "ramp" and result.confidence == 1.0
+    assert "pattern:linear" in result.flags
+    steps = [a.fitted.top - b.fitted.top for a, b in zip(result.ramp, result.ramp[1:], strict=False)]
+    assert max(steps) - min(steps) < 0.5 and min(steps) > 0  # same step every frame, never a stall or a reversal
+    assert all(abs(f.fitted.top - t) <= 2.0 for f, t in zip(result.ramp, truth, strict=True))
+
+
+def test_an_eased_matte_is_fitted_with_its_curve():
+    n = 24
+    truth = [46 - 46 * (3 * ((k + 0.5) / (n + 0.5)) ** 2 - 2 * ((k + 0.5) / (n + 0.5)) ** 3) for k in range(n)]
+    rng = random.Random(5)
+    measured = [round(t + rng.uniform(-1.5, 1.5)) for t in truth]
+    result = analyze_transition(frames_with_fine(truth, measured), OLD, NEW, FPS)
+    assert result.kind == "ramp"
+    assert any(flag.startswith("pattern:") and flag != "pattern:linear" for flag in result.flags)
+    # the ramp starts a few frames into the curve (its first steps are within a pixel of the old edge)
+    assert all(abs(f.fitted.top - truth[f.f - 40]) <= 2.0 for f in result.ramp)
+
+
+def test_a_ramp_that_changes_speed_keeps_its_measured_curve():
+    n = 24
+    truth = [46 - 46 * (0.9 * k / 8 if k < 8 else 0.9 + 0.1 * (k - 8) / 16) for k in range(n)]  # fast, then slow
+    measured = [round(t) for t in truth]
+    result = analyze_transition(frames_with_fine(truth, measured), OLD, NEW, FPS)
+    assert result.kind == "ramp"
+    assert not any(flag.startswith("pattern:") for flag in result.flags)
+
+
+def test_fit_pattern_needs_enough_frames_and_a_close_fit():
+    from cih_analyzer.ramps import fit_pattern
+
+    assert fit_pattern([0.2, 0.5, 0.8], 100.0) is None
+    line = [k / 12 for k in range(12)]
+    fit = fit_pattern(line, 200.0)
+    assert fit is not None and fit.model == "linear" and fit.rms_px < 0.5
+    jumpy = [0.0, 0.0, 0.0, 0.9, 0.9, 0.9, 1.0, 1.0, 1.0, 1.0]
+    assert fit_pattern(jumpy, 200.0) is None

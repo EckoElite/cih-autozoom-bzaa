@@ -236,8 +236,9 @@ def _scan_boundary(*args, **kwargs) -> list[ScanFrame]:
     """`scan_edges` for following a change: a lopsided frame (a bright part of the picture touching one edge, a dark
     part reading as matte) is unreadable here, because its safe, centred rectangle would look like the old picture
     and break a ramp in two."""
+    kwargs.setdefault("fine", kwargs.get("step") is None)  # a stride pass only has to find the stretch
     return [
-        replace(f, edges=None) if f.edges is not None and f.edges.lopsided else f
+        replace(f, edges=None, fine=None) if f.edges is not None and f.edges.lopsided else f
         for f in scan_edges(*args, **kwargs)
     ]
 

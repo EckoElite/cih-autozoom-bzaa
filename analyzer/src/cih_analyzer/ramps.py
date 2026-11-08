@@ -22,6 +22,8 @@ import statistics
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
+import numpy as np
+
 from .frames import Edges, ScanFrame
 
 EDGE_NAMES = ("top", "bottom", "left", "right")
@@ -33,6 +35,18 @@ DRIFT_PX = 1.0  # most the picture edge may drift between the two halves of a wi
 SCENE_CUT_MIN_DIFF = 6.0
 SCENE_CUT_RATIO = 4.0
 SMOOTHING_WINDOWS = (7, 5, 3, 1)
+
+# A matte that opens or closes in post is animated by a formula: constant speed, or an ease in and out. When the
+# measured edge follows one of those curves closely, the curve is a better description of the ramp than the
+# measurements, which carry a pixel or two of noise (more in a dim shot, where the edge is a faint step); playing the
+# measurements back would make the picture edge move in uneven steps.
+PATTERN_MODELS = ("linear", "smooth", "ease_in", "ease_out")  # in order of preference
+PATTERN_RMS_PX = 1.5  # most the curve may be from the measurements, as a root mean square
+PATTERN_MAX_PX = 3.5  # and from any one of them (a few exceptions are allowed and counted as misreads)
+PATTERN_MAX_EXCEPTIONS = 0.1
+PATTERN_MIN_FRAMES = 5  # fewer frames cannot show a pattern
+PATTERN_REF_FRAMES = 10  # frames either side of a ramp that give its two end positions (fine measurements)
+PATTERN_PREFER_SIMPLER = 1.15  # a simpler model wins unless a later one fits this much better
 
 
 @dataclass(frozen=True)
@@ -60,6 +74,121 @@ class FitFrame:
     fitted: Edges
     raw: Edges | None
     readable: bool
+
+
+def _shape(model: str, s: np.ndarray) -> np.ndarray:
+    if model == "linear":
+        return s
+    if model == "smooth":
+        return s * s * (3.0 - 2.0 * s)
+    if model == "ease_in":
+        return s * s
+    return 1.0 - (1.0 - s) ** 2  # ease_out
+
+
+@dataclass(frozen=True)
+class PatternFit:
+    """`values[k]` is the fitted progress (0 at the old edge, 1 at the new) of ramp frame k."""
+
+    model: str
+    start: float  # frame index (fractional, from the first ramp frame) where the edge starts to move
+    length: float  # frames it takes
+    values: tuple[float, ...]
+    rms_px: float
+    exceptions: tuple[int, ...]
+
+
+def _grid_fit(
+    model: str, k: np.ndarray, p: np.ndarray, t0s: np.ndarray, lengths: np.ndarray
+) -> tuple[float, float, float]:
+    """Best (start, length, mean squared error) of `model` over the grid; k and p are the readable frames."""
+    s = (k[None, None, :] - t0s[:, None, None]) / lengths[None, :, None]
+    fitted = _shape(model, np.clip(s, 0.0, 1.0))
+    err = ((fitted - p[None, None, :]) ** 2).mean(axis=2)
+    i, j = np.unravel_index(int(np.argmin(err)), err.shape)
+    return float(t0s[i]), float(lengths[j]), float(err[i, j])
+
+
+def fit_pattern(progress: list[float | None], span_px: float) -> PatternFit | None:
+    """Fit a constant-speed or eased curve to a ramp's per-frame progress (0 to 1, None where unreadable).
+
+    Each model has two unknowns, when the edge starts and how many frames it takes, found by a coarse search and then
+    a fine one. The simplest model that fits within PATTERN_RMS_PX is returned, or None when none does (a ramp that
+    stalls, reverses or changes speed is not a pattern, and keeps its measured curve)."""
+    n = len(progress)
+    idx = [i for i, v in enumerate(progress) if v is not None]
+    if n < PATTERN_MIN_FRAMES or len(idx) < PATTERN_MIN_FRAMES or span_px <= 0:
+        return None
+    k = np.array(idx, dtype=float)
+    p = np.array([progress[i] for i in idx], dtype=float)
+    coarse_t0 = np.arange(-3.0, n + 1.0, 0.5)
+    coarse_len = np.arange(1.0, n + 5.0, 0.5)
+    best: PatternFit | None = None
+    for model in PATTERN_MODELS:
+        t0, length, _ = _grid_fit(model, k, p, coarse_t0, coarse_len)
+        t0, length, err = _grid_fit(
+            model,
+            k,
+            p,
+            np.arange(t0 - 0.5, t0 + 0.51, 0.05),
+            np.arange(max(0.5, length - 0.5), length + 0.51, 0.05),
+        )
+        rms = (err**0.5) * span_px
+        if rms > PATTERN_RMS_PX:
+            continue
+        if best is not None and best.rms_px <= rms * PATTERN_PREFER_SIMPLER:
+            continue
+        values = _shape(model, np.clip((np.arange(n) - t0) / length, 0.0, 1.0))
+        residual = np.abs(values[idx] - p) * span_px
+        exceptions = tuple(idx[i] for i in np.flatnonzero(residual > PATTERN_MAX_PX))
+        if len(exceptions) > PATTERN_MAX_EXCEPTIONS * len(idx):
+            continue
+        best = PatternFit(model, t0, length, tuple(float(v) for v in values), rms, exceptions)
+    return best
+
+
+def _strictly_between(values: tuple[float, ...]) -> list[float]:
+    """Progress values nudged so they rise strictly and stay inside (0, 1): a flat stretch at an end of the fitted
+    curve (the edge has not started, or has arrived) would read as a stall."""
+    n = len(values)
+    eps = min(1e-3, 1.0 / (n + 1) / 10)
+    out = list(values)
+    for i in range(n):
+        out[i] = max(out[i], (out[i - 1] if i else 0.0) + eps)
+    for i in range(n - 1, -1, -1):
+        out[i] = min(out[i], (out[i + 1] if i < n - 1 else 1.0) - eps)
+    return out
+
+
+def _fine_progress(
+    frames: list[ScanFrame], name: str, start: int, end: int, a: float, b: float, params: RampParams
+) -> list[float | None] | None:
+    """Progress of each ramp frame from the sub-pixel measurements, with the two end positions taken from the same
+    kind of measurement on the settled frames either side. None when those are not there."""
+    reach = max(3.0, 2 * params.snap_px)
+
+    def settled(chunk: list[ScanFrame], at: float) -> list[float]:
+        return [
+            getattr(f.fine, name)
+            for f in chunk
+            if f.fine is not None and f.edges is not None and abs(getattr(f.edges, name) - at) <= reach
+        ]
+
+    head = settled(frames[max(0, start - PATTERN_REF_FRAMES) : start], a)
+    tail = settled(frames[end : end + PATTERN_REF_FRAMES], b)
+    if len(head) < 2 or len(tail) < 2:
+        return None
+    a_fine, b_fine = statistics.median(head), statistics.median(tail)
+    if (b_fine - a_fine) * (b - a) <= 0 or abs(b_fine - a_fine) < 0.5 * abs(b - a):
+        return None
+    out: list[float | None] = []
+    for f in frames[start:end]:
+        if f.fine is None or f.edges is None:
+            out.append(None)
+            continue
+        q = (getattr(f.fine, name) - a_fine) / (b_fine - a_fine)
+        out.append(None if q < -0.15 or q > 1.15 else min(1.0, max(0.0, q)))
+    return out
 
 
 @dataclass(frozen=True)
@@ -118,13 +247,17 @@ def isotonic_increasing(values: list[float], weights: list[float] | None = None)
 
 
 def _running_median(values: list[float | None], window: int) -> list[float | None]:
+    """Median of each value and its neighbours. The window is symmetric and shrinks at the ends of the series: a
+    lopsided window on a rising series pulls its median toward the inside, which would turn the first and last
+    frames of a steep ramp into "outliers"."""
     half = window // 2
     out: list[float | None] = []
     for i, v in enumerate(values):
         if v is None:
             out.append(None)
             continue
-        near = [x for x in values[max(0, i - half) : i + half + 1] if x is not None]
+        reach = min(half, i, len(values) - 1 - i)
+        near = [x for x in values[i - reach : i + reach + 1] if x is not None]
         out.append(statistics.median(near))
     return out
 
@@ -169,7 +302,10 @@ def _reject_outliers(raw: list[float | None], window: int, tol: float) -> list[f
         if v is None:
             out.append(None)
             continue
-        near = [x for x in raw[max(0, i - half) : i + half + 1] if x is not None]
+        # symmetric, shrinking at the ends (see _running_median): with the window cut off on one side the median of
+        # a steep ramp sits several frames' worth of pixels from the frame itself, and the ends read as outliers
+        reach = min(half, i, len(raw) - 1 - i)
+        near = [x for x in raw[i - reach : i + reach + 1] if x is not None]
         out.append(v if abs(v - statistics.median(near)) <= tol else None)
     return out
 
@@ -376,12 +512,21 @@ def _ramp(
     span = frames[start:end]
     fitted: dict[str, list[float]] = {}
     ok = True
+    patterns: list[str] = []
     misread = [
         f.edges is None for f in span
     ]  # unreadable, or an outlier among its neighbours (a flash frame)
     for n in EDGE_NAMES:
         a, b = getattr(old, n), getattr(new, n)
         if n in names:
+            fine = _fine_progress(frames, n, start, end, a, b, params)
+            pattern = fit_pattern(fine, abs(b - a)) if fine is not None else None
+            if pattern is not None:
+                fitted[n] = [a + (b - a) * v for v in _strictly_between(pattern.values)]
+                patterns.append(pattern.model)
+                for i in pattern.exceptions:
+                    misread[i] = True
+                continue
             raw = [None if f.edges is None else getattr(f.edges, n) for f in span]
             kept = _reject_outliers(raw, params.outlier_window, params.outlier_px)
             misread = [m or (r is not None and k is None) for m, r, k in zip(misread, raw, kept, strict=True)]
@@ -404,6 +549,8 @@ def _ramp(
         for k, f in enumerate(span)
     )
     flags = []
+    if patterns:
+        flags.append("pattern:" + "/".join(dict.fromkeys(patterns)))
     share = unreadable / len(span)
     if share > params.max_unreadable_share:
         flags.append("many_unreadable_frames")
