@@ -315,6 +315,16 @@ def dense_pass(
             wide = (4 * tol[0], 4 * tol[1])
             ends_ok = rects_close(first.rect, left.rect, wide) and rects_close(last.rect, right.rect, wide)
             if ends_ok:
+                # the first pass's ramp is measured again with today's analysis: ramps stored by an older one include
+                # cuts read as long ramps and ramps stretched by the dim shot's edge noise
+                again = refine_boundary(
+                    path, info, BoundaryWindow(min(lo, rb.t_start), max(hi, rb.t)), left.rect, right.rect, params.refine,
+                    floor=left.first, ceiling=right.last, threshold=threshold,
+                )  # fmt: skip
+                done[0] += 1
+                if again.confidence >= TRUST and "unresolved" not in again.flags:
+                    if again.kind == "cut" or ramp_ok(again, left, right):
+                        return again
                 return rb
             return _cut(
                 _conservative(rb.t_start, rb.t, left.rect, right.rect, info),
