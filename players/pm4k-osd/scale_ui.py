@@ -99,8 +99,33 @@ def is_background(control: ET.Element) -> bool:
     return control.get("type") == "group" and bool(kids) and all(is_background(kid) for kid in kids)
 
 
+# The title, subtitle and year under a poster: text keeps its size while its row spacing is scaled, and a focused poster
+# is zoomed (with its labels) about its centre, so the labels sit too low and the second line of the focused item lands
+# on the poster below. They are moved up by these many rows (after scaling); the focused layout's by more, since its
+# labels are also carried down by the zoom.
+ITEM_LABEL_UP = 14
+FOCUSED_LABEL_UP = 10
+SECOND_LINE_DOWN = 5  # the subtitle / year line sits this much lower than the title line: Roboto's lines are taller
+ITEM_LABEL = re.compile(r"ListItem\.(Label|Property\((subtitle|year)\))")
+ITEM_LABEL_MIN_POSY = 250  # unscaled: only labels that hang below a poster, not captions drawn over it
+ITEM_ROW_EXTRA = 12  # rows added to the pitch of a grid whose items hang labels, so a focused poster (zoomed up by
+# 10%) does not cover the year line of the item above it
+GRID_SCREENS = {"script-plex-posters.xml", "script-plex-posters-small.xml", "script-plex-squares.xml"}  # library grids
+_layout = [""]  # "itemlayout" or "focusedlayout" while their controls are being scaled
+_screen = [""]  # the screen being patched
+
 TEXT_TYPES = ("label", "fadelabel")
 TEXT_ROW_MAX = 120  # a group of text this tall or less is a row of text
+
+
+def hangs_labels(layout: ET.Element) -> bool:
+    """a list item layout with a title, subtitle or year label below its poster"""
+    for control in layout.iter("control"):
+        shown, posy = control.find("label"), number(control.find("posy"))
+        if control.get("type") == "label" and shown is not None and posy is not None and posy >= ITEM_LABEL_MIN_POSY:
+            if ITEM_LABEL.search(shown.text or ""):
+                return True
+    return False
 
 
 def is_small_image(control: ET.Element) -> bool:
@@ -153,7 +178,7 @@ def scale_control(control: ET.Element, top_level: bool, parent_width: float | No
             keep_focus_slot = (number(control.find("posx")), float(focus.text), float(old_width))
     width0 = number(control.find("width"))
     height0 = number(control.find("height"))
-    posx0, posy0 = number(control.find("posx")), number(control.find("posy"))
+    posy0 = number(control.find("posy"))
     keeps_width = width0 is not None and width0 >= KEEP_WIDTH
     is_text = is_text_row(control)
     keep_text_width = is_text and not in_item  # outside list items, text keeps its box width too (no extra truncation)
@@ -185,6 +210,19 @@ def scale_control(control: ET.Element, top_level: bool, parent_width: float | No
         posx, slot, old_width = keep_focus_slot
         new_width = old_width * SCALE
         control.find("posx").text = fmt(posx + slot * old_width - slot * new_width)
+    if (
+        in_item
+        and _screen[0] in GRID_SCREENS
+        and control.get("type") == "label"
+        and posy0 is not None
+        and posy0 >= ITEM_LABEL_MIN_POSY
+    ):
+        shown = control.find("label")
+        if shown is not None and ITEM_LABEL.search(shown.text or ""):
+            up = ITEM_LABEL_UP + (FOCUSED_LABEL_UP if _layout[0] == "focusedlayout" else 0)
+            if "ListItem.Label" not in (shown.text or ""):
+                up -= SECOND_LINE_DOWN
+            control.find("posy").text = fmt((number(control.find("posy")) or 0.0) - up)
     if top_level and not is_background(control):
         posy = control.find("posy")
         if posy is None:
@@ -196,9 +234,13 @@ def scale_control(control: ET.Element, top_level: bool, parent_width: float | No
             posy.text = fmt(value + TOP_OFFSET)
     for tag in ("itemlayout", "focusedlayout"):
         for node in control.findall(tag):
+            extra = ITEM_ROW_EXTRA if _screen[0] in GRID_SCREENS and hangs_labels(node) else 0
             for attr in ("width", "height"):
                 if node.get(attr):
-                    node.set(attr, scaled(node.get(attr)) or node.get(attr))
+                    value = scaled(node.get(attr))
+                    if value is not None and attr == "height" and extra:
+                        value = fmt(float(value) + extra)
+                    node.set(attr, value or node.get(attr))
     hitrect = control.find("hitrect")
     if hitrect is not None:
         for attr in ("x", "y", "w", "h"):
@@ -211,8 +253,10 @@ def scale_control(control: ET.Element, top_level: bool, parent_width: float | No
         scale_control(kid, False, kid_parent_width, in_item)
     for tag in ("itemlayout", "focusedlayout"):
         for node in control.findall(tag):
+            _layout[0] = tag
             for kid in node.findall("control"):
                 scale_control(kid, False, None, True)
+            _layout[0] = ""
 
 
 def scale_slide(node: ET.Element) -> None:
@@ -258,10 +302,11 @@ def scale_animation(anim: ET.Element) -> None:
 
 
 # per-page nudges after scaling: (control id, rows to move it up). The cast row on the movie page would otherwise end
-# with its role lines cut by the bottom of the band.
+# with its role lines cut by the bottom of the band; the resume progress bar (250) sits level with the bottom of the
+# poster instead of on the top of the cast row.
 TWEAKS = {
-    "script-plex-pre_play.xml": [("60", 40)],
-    "script-plex-pre_play-wl.xml": [("60", 40)],
+    "script-plex-pre_play.xml": [("60", 40), ("250", 30)],
+    "script-plex-pre_play-wl.xml": [("60", 40), ("250", 30)],
 }
 
 
@@ -294,6 +339,7 @@ def patched_tree(path: Path) -> bytes:
     root = ET.parse(path, parser=parser).getroot()
     if root.tag != "window":
         raise ValueError("not a window file")
+    _screen[0] = path.name
     coords = root.find("coordinates")
     if coords is None or coords.find("posy") is None:
         raise ValueError("no <coordinates><posy>")
