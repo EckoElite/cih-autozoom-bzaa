@@ -319,6 +319,38 @@ def apply_tweaks(name: str, controls: ET.Element) -> None:
                     control.find("posy").text = fmt(value - up)
 
 
+TEXTBOX_GAP = 4  # rows left between a trimmed text box and the button row under it
+TEXTBOX_MIN_HEIGHT = 60  # never trim a text box below about two lines
+BUTTON_ROW_ID = "300"  # the row of round buttons (info, play, shuffle, more) under the summary
+
+
+def _abs_boxes(node: ET.Element, x: float, y: float, out: list) -> None:
+    for control in node.findall("control"):
+        cx = x + (number(control.find("posx")) or 0.0)
+        cy = y + (number(control.find("posy")) or 0.0)
+        out.append((control, cx, cy))
+        _abs_boxes(control, cx, cy, out)
+
+
+def fit_textboxes(controls: ET.Element) -> None:
+    """Scaling keeps a text box at its full height (its text keeps its size) while the button row under it moves up with
+    the scaled layout, so a long biography or summary ran over the buttons. Trim each such box to end just above the row.
+    Boxes the row does not sit under (it may sit beside them) are left alone."""
+    boxes: list = []
+    _abs_boxes(controls, 0.0, 0.0, boxes)
+    rows = [(c, x, y) for c, x, y in boxes if c.get("type") == "grouplist" and c.get("id") == BUTTON_ROW_ID]
+    for control, x, y in boxes:
+        height, width = number(control.find("height")), number(control.find("width"))
+        if control.get("type") != "textbox" or height is None or width is None:
+            continue
+        for row, rx, ry in rows:
+            row_width = number(row.find("width")) or 0.0
+            overlaps_x = rx < x + width and x < rx + row_width
+            if overlaps_x and y < ry < y + height:
+                control.find("height").text = fmt(max(TEXTBOX_MIN_HEIGHT, ry - y - TEXTBOX_GAP))
+                break
+
+
 def add_masks(controls: ET.Element) -> None:
     """Black bars over everything above and below the band, drawn last (on top).
 
@@ -350,6 +382,7 @@ def patched_tree(path: Path) -> bytes:
     for control in controls.findall("control"):
         scale_control(control, True)
     apply_tweaks(path.name, controls)
+    fit_textboxes(controls)
     add_masks(controls)
     root.insert(0, ET.Comment(MARKER))
     ET.indent(root, space="    ")

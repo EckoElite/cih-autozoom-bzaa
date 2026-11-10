@@ -26,8 +26,12 @@ FONT_FILES = ("Roboto-Regular.ttf", "Roboto-Medium.ttf")
 OSD_FILE = "script-plex-seek_dialog.xml"
 
 
+TARGET: list[str] = []  # ["-s", "<ip>:<port>"] once connected: an emulator may be attached too, and adb refuses to guess
+
+
 def adb(*args: str, check: bool = True) -> str:
-    done = subprocess.run(["adb", *args], capture_output=True, text=True, check=False, env={**os.environ, "MSYS_NO_PATHCONV": "1"})
+    prefix = TARGET if args and args[0] != "connect" else []
+    done = subprocess.run(["adb", *prefix, *args], capture_output=True, text=True, check=False, env={**os.environ, "MSYS_NO_PATHCONV": "1"})
     if check and done.returncode != 0:
         raise SystemExit(f"adb {' '.join(args)} failed: {done.stderr.strip() or done.stdout.strip()}")
     return done.stdout
@@ -46,7 +50,9 @@ def connect() -> None:
         if "=" in line and not line.startswith("#"):
             key, _, value = line.partition("=")
             env[key.strip()] = value.strip()
-    adb("connect", f"{env['SHIELD_IP']}:{env.get('SHIELD_ADB_PORT', '5555')}")
+    address = f"{env['SHIELD_IP']}:{env.get('SHIELD_ADB_PORT', '5555')}"
+    adb("connect", address)
+    TARGET[:] = ["-s", address]
 
 
 def restore_originals(skin: Path) -> int:
