@@ -67,9 +67,12 @@ def truncated_matroska(path: str | os.PathLike[str]) -> str | None:
     declared = at + 4 + length + value
     if size + TRUNCATION_SLACK >= declared:
         return None
+    # Not "cut short": a copy that lost bytes in the middle (seen on one TV episode, whose Cues and Tags are still at
+    # the end) is as short as one that stopped early, and both read the same to the header.
     return (
-        f"file is cut short: {size:,} bytes on disk, its header says {declared:,} "
-        f"({(declared - size) / 1e9:.2f} GB missing, including the seek index); replace it with a complete copy"
+        f"file is incomplete: {size:,} bytes on disk, its header says {declared:,} "
+        f"({(declared - size) / 1e6:.1f} MB missing, so it was cut short or lost data and cannot be seeked reliably); "
+        "replace it with a complete copy"
     )
 
 

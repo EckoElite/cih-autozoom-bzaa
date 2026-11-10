@@ -31,7 +31,7 @@ def test_complete_file_is_fine(tmp_path):
 def test_cut_short_file_is_reported_with_the_missing_size(tmp_path):
     head = len(EBML) + 4 + 8
     message = truncated_matroska(_write(tmp_path, _mkv(declared=40_000_000, actual=20_000_000 + head)))
-    assert message is not None and "cut short" in message and "0.02 GB missing" in message
+    assert message is not None and "incomplete" in message and "20.0 MB missing" in message
 
 
 def test_a_few_bytes_short_is_not_flagged(tmp_path):
@@ -57,4 +57,4 @@ def test_missing_file_is_left_to_the_probe(tmp_path):
 def test_inspect_reports_it_as_broken_without_probing(tmp_path):
     head = len(EBML) + 4 + 8
     result = inspect_file(str(_write(tmp_path, _mkv(declared=40_000_000, actual=20_000_000 + head))))
-    assert result.info is None and result.skip.startswith("broken: file is cut short")
+    assert result.info is None and result.skip.startswith("broken: file is incomplete")
