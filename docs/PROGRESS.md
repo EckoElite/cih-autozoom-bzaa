@@ -3,6 +3,8 @@
 **Current phase:** 1 (Geometry calibration) complete on 2026-10-28 (SDR numbers accepted by the user); Phase 2 (player spikes) next
 **Last updated:** 2026-10-28
 
+**Two work threads (from 2026-11-09):** new dated entries go in `docs/PROGRESS-analyzer.md` (analyzer, container, Unraid, library rollout) or `docs/PROGRESS-shield.md` (Kodi build, add-ons, PM4K, acceptance on the Shield). Entries below this line are the shared history up to that date. Cross-thread requests go in `docs/CROSS-THREAD.md`.
+
 Site-specific facts (LAN addresses, share and library paths, film titles, per-file probe results) are kept in `docs/LOCAL_FACTS.md`, which is gitignored so this public repo does not carry them. Secrets live only in `.env` (also gitignored).
 
 ## PC environment (verified by running the commands)
