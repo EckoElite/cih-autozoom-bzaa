@@ -2,7 +2,35 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
-## 2026-11-10: ramp-tail errors fixed (0.3.19, not pushed yet)
+## 2026-11-10: container memory ballooned to 18 GB (0.3.20)
+
+Not a leak. `fit_pattern` searched a starts x lengths x frames grid built as one array, so memory and time grew with the
+cube of the ramp's length in frames. Every ramp of the dense pass goes through it (once per moving edge).
+
+| Ramp length (frames) | Peak memory before | Time before | Peak memory after | Time after |
+|---|---|---|---|---|
+| 60 | 39 MB | 0.3 s | n/a (unchanged path) | n/a |
+| 120 | 295 MB | 2.0 s | n/a | n/a |
+| 245 (EEAAO 104893) | 2,430 MB | 29 s | 80 MB | 0.7 s |
+| 500 | about 19 GB (extrapolated, n cubed) | minutes | 80 MB | 0.4 s |
+| 2000 | not run | not run | 80 MB | 0.6 s |
+
+Several workers (the 6 in the container, plus 3 express) each fitting a long ramp at once, plus ffmpeg, reaches 18 GB.
+After a kill the file is retried, so it would balloon again at the same ramp until the fixed image runs.
+
+Fix: the grid is evaluated in blocks of 2M elements (`GRID_CHUNK_ELEMENTS`), and the first search is capped at about 160
+starts x 160 lengths on at most 96 frames, then narrowed by tenths down to 0.05 frame. For ramps up to 80 frames the
+searched grid is identical; against the committed code, 30 of 32 noisy synthetic ramps (up to 110 frames) give the same
+model, start and length to 0.11 frame, and 2 ease-in ramps at 110 frames move by 0.1 frame. The real 245-frame ramp gives
+the same result as 0.3.19 (245 frames, worst readable error 3.0 px, last frames 0 to 2 px off). New test
+`test_fitting_a_long_ramp_takes_bounded_memory_and_time` (245, 700 and 1,500 frames; under 150 MB and 10 s).
+
+Also: the Unraid template gets `--memory=8g --memory-swap=8g` in Extra Parameters (installed containers keep their old
+settings until edited), so a runaway stops that container instead of the server. Not verified: that no other path grows
+with ramp length (the frames are streamed one at a time; `_fit_edge` and the isotonic fit are linear), and the container's
+real peak with 0.3.20.
+
+## 2026-11-10: ramp-tail errors fixed (0.3.19, pushed; CI green, image built, 62b87e4)
 
 Both defects from the check below had causes in `ramps.py`; neither is a measurement problem.
 

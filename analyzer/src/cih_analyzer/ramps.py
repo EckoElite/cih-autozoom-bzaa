@@ -53,6 +53,11 @@ PATTERN_MAX_EXCEPTIONS = 0.1
 PATTERN_MIN_FRAMES = 5  # fewer frames cannot show a pattern
 PATTERN_REF_FRAMES = 10  # frames either side of a ramp that give its two end positions (fine measurements)
 PATTERN_PREFER_SIMPLER = 1.15  # a simpler model wins unless a later one fits this much better
+COARSE_AXIS_POINTS = 160  # the first search looks at about this many starts, and this many lengths, at most
+COARSE_FRAMES = 96  # ... on at most this many of the readable frames
+GRID_CHUNK_ELEMENTS = (
+    2_000_000  # elements per block of the grid (16 MB per array), so memory never scales with it
+)
 
 
 @dataclass(frozen=True)
@@ -107,12 +112,21 @@ class PatternFit:
 def _grid_fit(
     model: str, k: np.ndarray, p: np.ndarray, t0s: np.ndarray, lengths: np.ndarray
 ) -> tuple[float, float, float]:
-    """Best (start, length, mean squared error) of `model` over the grid; k and p are the readable frames."""
-    s = (k[None, None, :] - t0s[:, None, None]) / lengths[None, :, None]
-    fitted = _shape(model, np.clip(s, 0.0, 1.0))
-    err = ((fitted - p[None, None, :]) ** 2).mean(axis=2)
-    i, j = np.unravel_index(int(np.argmin(err)), err.shape)
-    return float(t0s[i]), float(lengths[j]), float(err[i, j])
+    """Best (start, length, mean squared error) of `model` over the grid; k and p are the readable frames.
+
+    The grid is evaluated a band of starts at a time, so memory stays at a few tens of MB whatever its size (the whole
+    starts x lengths x frames array was 2.4 GB for a 245-frame ramp and grew with the cube of the length)."""
+    rows = max(1, GRID_CHUNK_ELEMENTS // max(1, len(lengths) * len(k)))
+    best = (math.inf, 0, 0)
+    for r0 in range(0, len(t0s), rows):
+        block = t0s[r0 : r0 + rows]
+        s = (k[None, None, :] - block[:, None, None]) / lengths[None, :, None]
+        fitted = _shape(model, np.clip(s, 0.0, 1.0))
+        err = ((fitted - p[None, None, :]) ** 2).mean(axis=2)
+        i, j = np.unravel_index(int(np.argmin(err)), err.shape)
+        if err[i, j] < best[0]:
+            best = (float(err[i, j]), r0 + int(i), int(j))
+    return float(t0s[best[1]]), float(lengths[best[2]]), best[0]
 
 
 def fit_pattern(progress: list[float | None], span_px: float) -> PatternFit | None:
@@ -127,18 +141,33 @@ def fit_pattern(progress: list[float | None], span_px: float) -> PatternFit | No
         return None
     k = np.array(idx, dtype=float)
     p = np.array([progress[i] for i in idx], dtype=float)
-    coarse_t0 = np.arange(-3.0, n + 1.0, 0.5)
-    coarse_len = np.arange(1.0, n + 5.0, 0.5)
+    # The search grid is kept to a fixed size however long the ramp is: a coarser first step (half a frame up to 80
+    # frames), on at most COARSE_FRAMES of the readable frames, then each stage narrows to a window of one step either
+    # side of the best cell at a tenth of the step, down to 0.05 of a frame.
+    coarse = max(0.5, n / COARSE_AXIS_POINTS)
+    pick = (
+        np.unique(np.linspace(0, len(k) - 1, COARSE_FRAMES).astype(int))
+        if len(k) > COARSE_FRAMES
+        else slice(None)
+    )
     best: PatternFit | None = None
     for model in PATTERN_MODELS:
-        t0, length, _ = _grid_fit(model, k, p, coarse_t0, coarse_len)
-        t0, length, err = _grid_fit(
-            model,
-            k,
-            p,
-            np.arange(t0 - 0.5, t0 + 0.51, 0.05),
-            np.arange(max(0.5, length - 0.5), length + 0.51, 0.05),
+        t0, length, _ = _grid_fit(
+            model, k[pick], p[pick], np.arange(-3.0, n + 1.0, coarse), np.arange(1.0, n + 5.0, coarse)
         )
+        window = coarse
+        while True:
+            fine = max(0.05, window / 10.0) if window > 0.5 else 0.05
+            t0, length, err = _grid_fit(
+                model,
+                k,
+                p,
+                np.arange(t0 - window, t0 + window + fine / 2, fine),
+                np.arange(max(0.5, length - window), length + window + fine / 2, fine),
+            )
+            window = fine
+            if fine <= 0.05:
+                break
         rms = (err**0.5) * span_px
         if rms > PATTERN_RMS_PX:
             continue

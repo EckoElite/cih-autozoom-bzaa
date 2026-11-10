@@ -354,3 +354,26 @@ def test_a_ramp_that_a_cut_ends_part_way_is_not_dragged_toward_the_new_edge():
     assert result.first_new == 40 + n
     assert all(abs(f.fitted.top - f.raw.top) <= 2.0 for f in result.ramp)  # the last frames included
     assert all(f.readable for f in result.ramp)
+
+
+@pytest.mark.parametrize("n", [245, 700, 1500])
+def test_fitting_a_long_ramp_takes_bounded_memory_and_time(n):
+    """The pattern search used to build a starts x lengths x frames array: 2.4 GB at 245 frames, ~19 GB at 500, which
+    hung the NAS (Everything Everywhere, 2026-11). Its memory must not grow with the ramp's length."""
+    import time
+    import tracemalloc
+
+    from cih_analyzer.ramps import fit_pattern
+
+    start, length = n * 0.3, n * 0.4
+    progress = [min(1.0, max(0.0, (k - start) / length)) for k in range(n)]
+    tracemalloc.start()
+    began = time.perf_counter()
+    fit = fit_pattern(progress, 200.0)
+    elapsed = time.perf_counter() - began
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert peak < 150e6, f"{peak / 1e6:.0f} MB"
+    assert elapsed < 10.0, f"{elapsed:.1f} s"
+    assert fit is not None and fit.model == "linear"
+    assert abs(fit.start - start) < 0.5 and abs(fit.length - length) < 0.5

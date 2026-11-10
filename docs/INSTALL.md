@@ -178,6 +178,15 @@ All settings are environment variables; change them by editing the container and
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `TZ` | | time zone for quiet hours and the page |
 
+### Memory limit (recommended)
+
+Set **Extra Parameters** (Edit the container, switch on *Advanced View*) to `--memory=8g --memory-swap=8g`; the template
+now has this by default, but an already-installed container keeps its old settings until you add it. With a limit, a
+runaway analysis is stopped and restarted by Docker on its own, instead of using all of the server's RAM until
+the whole Unraid box hangs (this happened twice on 2026-11-09/10, see PROGRESS-analyzer.md). Normal use is well under
+2 GB with `CONCURRENCY` 1 and a few GB at 6 workers plus 3 express workers; raise the limit if the log shows
+"Killed" with nothing wrong in the analysis.
+
 ## 5. Updating, backing up, removing
 
 - **Update.** **Docker** tab, **Check for Updates**, then **apply update** on the row. Appdata is kept; a newer

@@ -14,7 +14,7 @@
   <WebUI>http://[IP]:[PORT:8765]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/EckoElite/cih-autozoom-bzaa/main/unraid/cih-analyzer.xml</TemplateURL>
   <Icon/>
-  <ExtraParams/>
+  <ExtraParams>--memory=8g --memory-swap=8g</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DonateText/>
