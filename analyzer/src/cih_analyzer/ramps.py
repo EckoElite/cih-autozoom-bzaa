@@ -153,11 +153,17 @@ def fit_pattern(progress: list[float | None], span_px: float) -> PatternFit | No
     return best
 
 
-def _strictly_between(values: tuple[float, ...]) -> list[float]:
+def _strictly_between(values: tuple[float, ...], span_px: float) -> list[float]:
     """Progress values nudged so they rise strictly and stay inside (0, 1): a flat stretch at an end of the fitted
-    curve (the edge has not started, or has arrived) would read as a stall."""
+    curve (the edge has not started, or has arrived) would read as a stall.
+
+    The nudge adds up over a flat stretch, one step per frame, and the stretch can be long (the scanned window runs on
+    past the ramp, or starts well before it): at a thousandth of the distance per frame, 35 flat frames after a
+    231 px ramp held its last frames 8 px short of the new edge, and 170 flat frames before one lifted the start of
+    the next by 16 px (Everything Everywhere at 1956 s and 4385 s). The steps are so small that the whole nudge, however
+    long the flat stretch, stays under a quarter of a pixel."""
     n = len(values)
-    eps = min(1e-3, 1.0 / (n + 1) / 10)
+    eps = min(1e-3, 1.0 / (n + 1) / 10, 0.25 / (max(span_px, 1.0) * (n + 1)))
     out = list(values)
     for i in range(n):
         out[i] = max(out[i], (out[i - 1] if i else 0.0) + eps)
@@ -363,7 +369,11 @@ def _fit_edge(
 
     def smooth(window: int) -> list[float]:
         pad = window // 2
-        padded = [0.0] * pad + dense + [span] * pad
+        # Padded with the series' own first and last values. Padding with 0 and `span` (the two states) assumed the
+        # ramp starts at the old edge and ends at the new one, but a ramp that a cut ends part-way (Everything
+        # Everywhere at 4385 s: the matte stops at 87% and the next shot is at the new ratio) was dragged toward `span`
+        # over its last frames, up to 11 px, and the frames then counted as misreads and were filled.
+        padded = [dense[0]] * pad + dense + [dense[-1]] * pad
         out = [sum(padded[i : i + window]) / window for i in range(n)]
         eps = min(1e-3, span / (n + 1) / 10)
         for i in range(n):  # strictly increasing, kept inside the anchors
@@ -558,7 +568,7 @@ def _ramp(
             fine = _fine_progress(frames, n, start, end, a, b, params)
             pattern = fit_pattern(fine, abs(b - a)) if fine is not None else None
             if pattern is not None:
-                fitted[n] = [a + (b - a) * v for v in _strictly_between(pattern.values)]
+                fitted[n] = [a + (b - a) * v for v in _strictly_between(pattern.values, abs(b - a))]
                 patterns.append(pattern.model)
                 fits.append(pattern)
                 for i in pattern.exceptions:

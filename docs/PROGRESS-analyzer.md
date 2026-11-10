@@ -2,6 +2,26 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-10: ramp-tail errors fixed (0.3.19, not pushed yet)
+
+Both defects from the check below had causes in `ramps.py`; neither is a measurement problem.
+
+| Defect | Cause (verified by running the production `refine_boundary` on the local file) | Fix |
+|---|---|---|
+| Ramp 46888 to 46910: last two frames 8 and 16 px short of the new edge | `_strictly_between` makes the pattern curve rise strictly by adding one step (a thousandth of the distance, or a tenth of one over the frame count) per frame. It runs over every frame of the fitted span, and that span can run on past the ramp. 35 flat frames after a 231 px ramp pulled the end back by `35 x 1/59/10 x 231` = 13.7 px. The same sum at the start lifted a ramp that sits still for 170 frames by up to 16 px (found on the 245-frame ramp: fit 56.6 against raw 41 at frame 105058; the container's output showed 8.7 px at its worst frame because its window differed) | The step is capped so the whole nudge stays under 0.25 px: `eps = min(1e-3, 1/(n+1)/10, 0.25/(span_px x (n+1)))`. Still strictly rising, no rounding on storage |
+| Ramp 104893 to 105137: last 3 frames (matte stops at 87%, the next shot cuts to the new ratio) dragged toward the new edge, then counted as misreads and filled | `_fit_edge` smooths with a moving average padded by 0 at the start and by the full distance at the end, which assumes the ramp reaches the new edge. A ramp that a cut ends part-way gets its last frames pulled up, so they miss the 2 px tolerance, and up to 3% of frames may miss it and are then called misreads | The padding is the series' own first and last values |
+
+**Tests:** two new tests in `analyzer/tests/test_ramps.py`. Both **fail on the 0.3.18 `ramps.py` and pass on the fix** (checked by running them against a copy of the old file): `test_a_long_wait_after_a_ramp_does_not_hold_its_last_frames_back` (calls `_ramp` with 80 flat frames after a 22-frame ramp; old code: last ramp frame 3.62 px against a true 2.04, new code 2.04) and `test_a_ramp_that_a_cut_ends_part_way_is_not_dragged_toward_the_new_edge` (150-frame ramp stopping at 60%; old code: last 3 frames 2.1, 4.9 and 7.6 px from the raw edge, the last two flagged unreadable).
+
+**Real data (local file, production `refine_boundary`, same windows for old and new):**
+
+| Ramp | Worst readable frame, fit against raw top edge: 0.3.18 | Fix |
+|---|---|---|
+| 46888 to 46910 (last frame 46910, raw 41) | 49.1 at 46910 (8 px) | 41.2 |
+| 104893 to 105137 | 16.2 px (frames 105058 to 105069, fit 56.6 to 57.6 against raw 41 to 54) | 3.0 px, no frame over 3 px |
+
+**Not changed by this fix:** the container's own copy of these ramps. It needs 0.3.19 in the container and Everything Everywhere re-analyzed (a minor version bump does not re-queue titles by itself).
+
 ## 2026-11-10: Everything Everywhere timeline from the container (0.3.18, dense pass) checked against the local file
 
 The container is up (`http://10.29.20.200:8765`, 0.3.18, scheduler **paused**, 619 queued, 3,507 done). My note of 2026-11-09 that it was "unreachable" was wrong: `ANALYZER_URL` is empty in `.env`, so I had queried nothing. The status route is `/health` (not `/api/v1/health`).

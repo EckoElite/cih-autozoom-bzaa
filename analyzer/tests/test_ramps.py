@@ -320,3 +320,37 @@ def test_a_hard_cut_into_a_dim_shot_whose_edge_flickers_is_a_cut_not_a_ramp():
     new = Edges(top=274, bottom=1886, left=0, right=3840)
     result = analyze_transition(frames, old, new, FPS)
     assert (result.kind, result.first_new) == ("cut", 40)
+
+
+def test_a_long_wait_after_a_ramp_does_not_hold_its_last_frames_back():
+    """Everything Everywhere at 1956 s: a 22-frame matte closing, then 80 flat frames inside the span that was fitted
+    (the span ran on past the ramp). The curve was made strictly rising over the whole span, and each flat frame moved
+    the end of it back by about a tenth of the distance divided by the span's length (a thousandth at most), so the last ramp frames were 8 to 16 px
+    short of the new edge (on a distance of 231 px; here the distance is 46 px, so 80 flat frames show it as 1.5 px)."""
+    from cih_analyzer.ramps import _ramp
+
+    n = 22
+    truth = [46 - 46 * (k + 0.5) / (n + 0.5) for k in range(n)]
+    measured = [round(t) for t in truth]
+    frames = frames_with_fine(truth, measured, lead=40, tail=100)
+    result = _ramp(frames, ["top", "bottom"], OLD, NEW, 40, 40 + n + 80, FPS, RampParams())
+    assert result.kind == "ramp" and "pattern:linear" in result.flags
+    assert all(abs(f.fitted.top - truth[f.f - 40]) <= 1.0 for f in result.ramp[:n])
+    assert (
+        result.ramp[n - 1].fitted.top < 2.5
+    )  # the last ramp frame is at the new edge, not 1.5 px short of it
+
+
+def test_a_ramp_that_a_cut_ends_part_way_is_not_dragged_toward_the_new_edge():
+    """Everything Everywhere at 4385 s: a 10 s matte opening that stops at about 60% when the shot cuts to the new
+    ratio. Smoothing padded the end of the curve with the new edge, which pulled the last frames toward it by up to
+    11 px and made them count as misreads."""
+    n = 150
+    truth = [46 - 28 * (k + 0.5) / n for k in range(n)]  # 46 down to 18, then the cut to 0
+    measured = [round(t) for t in truth]
+    frames = frames_for([46] * 40 + measured + [0] * 40)
+    result = analyze_transition(frames, OLD, NEW, FPS)
+    assert result.kind == "ramp"
+    assert result.first_new == 40 + n
+    assert all(abs(f.fitted.top - f.raw.top) <= 2.0 for f in result.ramp)  # the last frames included
+    assert all(f.readable for f in result.ramp)
