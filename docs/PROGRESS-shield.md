@@ -2,6 +2,12 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-10: emoji above U+FFFF stripped from PM4K text
+
+New `players/pm4k-osd/patch_emoji.py` patches `lib/windows/kodigui.py` in the add-on (original kept as `kodigui.py.cih-orig`): a `cihNoAstral()` helper drops characters above U+FFFF, the joiners and variation selectors that go with them and the extra space left, and is applied to list item labels (`ManagedListItem` constructor, `setLabel`, `setLabel2`, `setProperty`) and to both window and dialog `setProperty`. `reapply.py` pulls, patches and pushes the file with the rest. Helper checked offline on sample strings (flame, flame mid-title, ZWJ family sequence, multi-line, non-strings, a heart with a variation selector); patched file compiles.
+
+Verified on the Shield, Movies library grid: "Trending Movies Now" shows "Trending Movies..." with no box; "Popular Movies" keeps its outline star; PM4K starts and browses normally. The flame in the collection's poster artwork is part of Plex's image and stays. Not checked: titles with emoji elsewhere (search results, details pages), because the library only has the two collection names above with emoji, as far as the Plex API shows.
+
 ## 2026-11-09 (later): emoji in PM4K titles, partly fixed with a merged font
 
 Built `RobotoEmoji-Regular.ttf` and `RobotoEmoji-Medium.ttf` (Roboto from the Shield's `/system/fonts` plus Google's monochrome Noto Emoji, weights 400 and 500, 5250 glyphs, about 1.1 MiB each) with `players/pm4k-osd/build_emoji_font.py` (needs `pip install fonttools`; downloads Noto Emoji, SIL OFL 1.1, from github.com/google/fonts once). `apply_font.py` now points the four `plex*` fonts at those files (and migrates a Font.xml that still names the plain Roboto files); `reapply.py` builds and pushes the files when the skin's fonts folder lacks them. The two files were pushed to the Shield's skin fonts folder and Font.xml was updated; Kodi restarted.
