@@ -18,12 +18,16 @@ import sys
 from pathlib import Path
 
 # PM4K's name -> (new name, font file, size). The sizes are the old ones adjusted for Roboto's wider letters.
+# The .ttf files are Roboto with Noto Emoji merged in (build_emoji_font.py), so characters like a star or a heart in a
+# title are drawn instead of a box. Kodi only looks up glyphs up to U+FFFF, so emoji above that (a flame, a clapper board)
+# still show as a box whatever the font holds.
 FONTS = {
-    "font10": ("plex10", "Roboto-Medium.ttf", 22),  # poster titles, small headings
-    "font12": ("plex12", "Roboto-Regular.ttf", 25),  # body text, buttons
-    "font13": ("plex13", "Roboto-Regular.ttf", 22),
-    "font14": ("plex14", "Roboto-Regular.ttf", 19),
+    "font10": ("plex10", "RobotoEmoji-Medium.ttf", 22),  # poster titles, small headings
+    "font12": ("plex12", "RobotoEmoji-Regular.ttf", 25),  # body text, buttons
+    "font13": ("plex13", "RobotoEmoji-Regular.ttf", 22),
+    "font14": ("plex14", "RobotoEmoji-Regular.ttf", 19),
 }
+OLD_FILES = {"Roboto-Medium.ttf": "RobotoEmoji-Medium.ttf", "Roboto-Regular.ttf": "RobotoEmoji-Regular.ttf"}  # first version
 FONT_FILES = sorted({file for _, file, _ in FONTS.values()})
 
 
@@ -36,7 +40,18 @@ def patch_font_xml(path: Path, check: bool) -> str:
     crlf = "\r\n" in text
     text = text.replace("\r\n", "\n")
     if "<name>plex10</name>" in text:
-        return "already has the plex fonts"
+        old = re.findall(r"(<name>plex1[0-4]</name>\s*<filename>)(Roboto-(?:Medium|Regular)\.ttf)(</filename>)", text)
+        if not old:
+            return "already has the plex fonts"
+        if check:
+            return "has the plex fonts, but with the files without emoji"
+        text = re.sub(
+            r"(<name>plex1[0-4]</name>\s*<filename>)(Roboto-(?:Medium|Regular)\.ttf)(</filename>)",
+            lambda m: m.group(1) + OLD_FILES[m.group(2)] + m.group(3),
+            text,
+        )
+        path.write_bytes((text.replace("\n", "\r\n") if crlf else text).encode("utf-8"))
+        return f"pointed {len(old)} plex fonts at the files with emoji"
     if check:
         return "needs the plex fonts"
     block = "".join(font_block(new, file, size) for new, file, size in FONTS.values())

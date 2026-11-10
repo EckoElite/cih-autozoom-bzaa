@@ -22,7 +22,7 @@ KODI = "/sdcard/Android/data/org.xbmc.kodi.cih/files/.kodi/addons"
 PM4K = f"{KODI}/script.plexmod"
 SKIN_FONTS = f"{KODI}/skin.scope.nox.omega"
 SCALE_MARKER = "cih-scale-ui"
-FONT_FILES = ("Roboto-Regular.ttf", "Roboto-Medium.ttf")
+FONT_FILES = ("RobotoEmoji-Regular.ttf", "RobotoEmoji-Medium.ttf")  # needs `pip install fonttools` on the PC to build
 OSD_FILE = "script-plex-seek_dialog.xml"
 
 
@@ -71,6 +71,25 @@ def restore_originals(skin: Path) -> int:
     return restored
 
 
+def push_fonts(work: Path) -> None:
+    """Put the Roboto + Noto Emoji files (see build_emoji_font.py) in the skin's fonts folder if they are not there yet."""
+    missing = []
+    for name in FONT_FILES:
+        have = adb("shell", "ls", f"{SKIN_FONTS}/fonts/{name}", check=False)
+        if name not in have or "No such file" in have:
+            missing.append(name)
+    if not missing:
+        return
+    sources = []
+    for name in ("Roboto-Regular.ttf", "Roboto-Medium.ttf"):  # the Shield's own, from /system/fonts
+        local = work / name
+        adb("pull", f"/system/fonts/{name}", str(local))
+        sources.append(str(local))
+    print(run("build_emoji_font.py", *sources, str(work / "emoji-fonts")).strip())
+    for name in missing:
+        adb("push", str(work / "emoji-fonts" / name), f"{SKIN_FONTS}/fonts/{name}")
+
+
 def main(argv: list[str]) -> int:
     push = "--no-push" not in argv
     work = Path(argv[argv.index("--workdir") + 1]) if "--workdir" in argv else Path(tempfile.mkdtemp(prefix="pm4k-"))
@@ -103,12 +122,7 @@ def main(argv: list[str]) -> int:
     if (work / "Font.xml.cih-bak").exists():
         adb("push", str(work / "Font.xml.cih-bak"), f"{SKIN_FONTS}/scopeformat/Font.xml.cih-bak")
     adb("push", str(plex / "lib" / "windows" / "dropdown.py"), f"{PM4K}/lib/windows/dropdown.py")
-    for name in FONT_FILES:
-        have = adb("shell", "ls", f"{SKIN_FONTS}/fonts/{name}", check=False)
-        if name not in have or "No such file" in have:
-            local = work / name
-            adb("pull", f"/system/fonts/{name}", str(local))
-            adb("push", str(local), f"{SKIN_FONTS}/fonts/{name}")
+    push_fonts(work)
     print("pushed; start Kodi (adb shell am start -n org.xbmc.kodi.cih/.Splash)")
     return 0
 
