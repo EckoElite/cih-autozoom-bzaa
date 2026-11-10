@@ -2,6 +2,16 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-09: stretch summary (tests, flaky ramp test, container reachability)
+
+| Item | Result | How verified |
+|---|---|---|
+| Flaky ramp test in `test_refine.py` | **Not reproduced.** 6 runs of all 24 tests in a row passed (126 to 267 s each; the slowest runs overlapped other work on this PC). No fix made. The earlier "flaky" note in the history was about the Shield add-on timing tests, which were already fixed with a `wait_for` helper | Ran `pytest analyzer/tests/test_refine.py` 6 times |
+| Rest of the analyzer suite | 406 passed, 1 skipped (380 s) | `pytest analyzer/tests --ignore=test_refine.py` |
+| Lint | `ruff check` and `ruff format --check analyzer` clean | Ran both |
+| Container reachability | At about this time the analyzer port from `.env` (`ANALYZER_URL`) refused connections (curl code 000 on `/api/v1/health` and `/status`) while the NAS host answered ping. Probably stopped, paused or being updated; I did not touch it | curl and ping |
+| EEAAO timeline check | **Not done**: needs the container's stored timeline (unreachable) or a multi-hour local dense run on `Samples/`. Waiting for the user | none |
+
 ## 2026-11-09: Love It or List It S10E02 inspected; broken-file wording corrected
 
 | Item | Result | How verified |
