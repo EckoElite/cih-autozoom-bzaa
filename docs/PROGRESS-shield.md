@@ -2,6 +2,18 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-09 (later): emoji in PM4K titles, partly fixed with a merged font
+
+Built `RobotoEmoji-Regular.ttf` and `RobotoEmoji-Medium.ttf` (Roboto from the Shield's `/system/fonts` plus Google's monochrome Noto Emoji, weights 400 and 500, 5250 glyphs, about 1.1 MiB each) with `players/pm4k-osd/build_emoji_font.py` (needs `pip install fonttools`; downloads Noto Emoji, SIL OFL 1.1, from github.com/google/fonts once). `apply_font.py` now points the four `plex*` fonts at those files (and migrates a Font.xml that still names the plain Roboto files); `reapply.py` builds and pushes the files when the skin's fonts folder lacks them. The two files were pushed to the Shield's skin fonts folder and Font.xml was updated; Kodi restarted.
+
+Verified on the Shield (Movies grid, collection tiles): the star in "Popular Movies" (U+2B50, in the Basic Multilingual Plane) now draws as an outline star. The flame in "Trending Movies Now" (U+1F525) still draws as a box.
+
+Cause, with one caveat: Kodi looks up glyphs by the low 16 bits of the character (from memory of its font code, not checked against the source here), so characters above U+FFFF (a flame, a clapper board, a popcorn box) cannot draw whatever the font holds, while BMP symbols (star, heart, sun, lightning, sparkles) can. Emoji are drawn flat, in the text colour.
+
+Options for the astral ones, not done: strip them from titles in PM4K's Python (a patch like `patch_dropdown.py`), or map them into the font's private use area and translate the titles. The collections in the Movies and TV Shows libraries with emoji names are: a flame ("Trending ... Now") and a star ("Popular ..."), one pair per library.
+
+Side note: once, closing the search panel with Back and pressing Down showed PM4K's "Sign in with Plex" (plex.tv/link) code screen. Pressing Back returned to the signed-in home screen, so nothing was lost; cause unknown. Nothing was entered on it.
+
 ## 2026-11-09: PM4K screens checked after the Roboto font change; one layout fault fixed
 
 Checked on the Shield by `adb screencap` (the Kodi GUI is captured; video is not), with the patches re-applied:
