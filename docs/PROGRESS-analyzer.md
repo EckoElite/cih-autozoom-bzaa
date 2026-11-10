@@ -2,6 +2,18 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-10: EEAAO finished in the container on 0.3.19 (checked against the container's own output)
+
+Analysed once (attempts 1), dense pass, 6,488 s, 247 segments, 12 ramps, all readable ranges stored. 0.3.20 pushed and CI green (image built); the container still ran 0.3.19.
+
+| Ramp | Result |
+|---|---|
+| 46888 to 46909 | fixed: ends 93.5, 83.0, 72.5, 62.0, 51.5 at about 10.5 px a frame, and the next segment starts on 46910 at y=40, so the last step lands on it (0.3.18 stopped at 57.9 and the next segment started a frame later) |
+| 104893 to 105137 | **not fixed in the container**: last three frames (105135 to 105137) are still filled at 242.1, 248.1, 253.7 against raw 240, 242, 243 (up to 10.7 px, identical to the 0.3.18 numbers). Replaying the container's own raw edges for this ramp through 0.3.19 `analyze_transition` (with flat frames added before and after) gives 241.3 for the last frame, and my production `refine_boundary` run on the local file gave 243.6, so the container reached the ramp by a path or window my replays did not. Cause not found yet |
+| the other 10 | unchanged from the 0.3.18 check (within 4 px) |
+
+0.3.20 does not change this output (fit start and length move by at most 0.1 frame), so re-analysing EEAAO on 0.3.20 is not expected to fix 104893's tail either.
+
 ## 2026-11-10: container memory ballooned to 18 GB (0.3.20)
 
 Not a leak. `fit_pattern` searched a starts x lengths x frames grid built as one array, so memory and time grew with the
