@@ -402,7 +402,7 @@ def main(argv: list[str]) -> int:
         print(f"not a folder: {folder}")
         return 2
     bad = 0
-    for path in sorted(folder.glob("script-plex-*.xml")):
+    for path in sorted([*folder.glob("script-plex-*.xml"), *folder.glob("script-cih-*.xml")]):
         if path.name in SKIP or (only is not None and path.name not in only):
             continue
         text = path.read_text(encoding="utf-8")

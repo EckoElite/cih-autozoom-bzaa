@@ -69,7 +69,7 @@ def patch_font_xml(path: Path, check: bool) -> str:
 def patch_screens(folder: Path, check: bool) -> list[str]:
     report = []
     pattern = re.compile(r"<font>(font1[0-4])</font>")
-    for path in sorted(folder.glob("script-plex-*.xml")):
+    for path in sorted([*folder.glob("script-plex-*.xml"), *folder.glob("script-cih-*.xml")]):
         raw = path.read_bytes().decode("utf-8")
         found = pattern.findall(raw)
         if not found:

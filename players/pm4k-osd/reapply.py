@@ -106,15 +106,24 @@ def main(argv: list[str]) -> int:
     adb("pull", f"{PM4K}/lib/windows/dropdown.py", str(plex / "lib" / "windows" / "dropdown.py"))
     dropdown_orig = plex / "lib" / "windows" / "dropdown.py.cih-orig"
     adb("pull", f"{PM4K}/lib/windows/dropdown.py.cih-orig", str(dropdown_orig), check=False)
+    (plex / "lib" / "windows" / "mixins").mkdir(parents=True, exist_ok=True)
+    adb("pull", f"{PM4K}/lib/windows/mixins/roles.py", str(plex / "lib" / "windows" / "mixins" / "roles.py"))
+    adb("pull", f"{PM4K}/lib/windows/mixins/roles.py.cih-orig", str(plex / "lib" / "windows" / "mixins" / "roles.py.cih-orig"), check=False)
     adb("pull", f"{PM4K}/lib/windows/kodigui.py", str(plex / "lib" / "windows" / "kodigui.py"))
     adb("pull", f"{PM4K}/lib/windows/kodigui.py.cih-orig", str(plex / "lib" / "windows" / "kodigui.py.cih-orig"), check=False)
 
     print(f"restored {restore_originals(skin)} patched screens from their originals")
+    for stale in skin.glob("script-cih-*"):
+        stale.unlink()  # the person page is built again from the restored screens below
+    print(run("person/make_person_xml.py", str(skin)).strip())
     print(run("scale_ui.py", str(skin)).strip().splitlines()[-1])
     print(run("apply_osd_margin.py", str(skin)).strip().splitlines()[-1])
     print(run("apply_font.py", str(skin), str(fonts)).strip().splitlines()[0])
     print(run("patch_dropdown.py", str(plex)).strip().splitlines()[-1])
     print(run("patch_emoji.py", str(plex)).strip().splitlines()[-1])
+    print(run("patch_person.py", str(plex)).strip().splitlines()[-1])
+    for backup in skin.glob("script-cih-*.cih-orig"):
+        backup.unlink()
     if not push:
         print(f"patched copy left in {work}")
         return 0
@@ -126,6 +135,8 @@ def main(argv: list[str]) -> int:
         adb("push", str(work / "Font.xml.cih-bak"), f"{SKIN_FONTS}/scopeformat/Font.xml.cih-bak")
     adb("push", str(plex / "lib" / "windows" / "dropdown.py"), f"{PM4K}/lib/windows/dropdown.py")
     adb("push", str(plex / "lib" / "windows" / "kodigui.py"), f"{PM4K}/lib/windows/kodigui.py")
+    adb("push", str(plex / "lib" / "windows" / "person.py"), f"{PM4K}/lib/windows/person.py")
+    adb("push", str(plex / "lib" / "windows" / "mixins" / "roles.py"), f"{PM4K}/lib/windows/mixins/roles.py")
     push_fonts(work)
     print("pushed; start Kodi (adb shell am start -n org.xbmc.kodi.cih/.Splash)")
     return 0
