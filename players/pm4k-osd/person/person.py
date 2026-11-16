@@ -11,6 +11,7 @@ and the caller falls back to the old per-section grid.
 from __future__ import absolute_import
 
 import datetime
+import re
 
 from kodi_six import xbmc
 from kodi_six import xbmcgui
@@ -23,6 +24,7 @@ from . import dropdown
 from . import info
 from . import kodigui
 from . import opener
+from . import search
 from . import windowutils
 
 POSTER_DIM = util.scaleResolution(244, 361)
@@ -135,6 +137,19 @@ def thumbUrl(server, url, dim):
         return url
 
 
+NO_GLYPH = re.compile(u'[⺀-鿿가-힯豈-﫿＀-￯]+')
+
+
+def cleanSummary(text):
+    """the biography without the source line, and without the Chinese, Japanese or Korean spellings that the font
+    cannot draw (they would show as boxes)"""
+    text = (text or u'').replace(u'\xa0', u' ').split(u'\n\nDescription above')[0]
+    text = NO_GLYPH.sub(u'', text)
+    text = re.sub(u'\\((?:[A-Za-z ]+:\\s*)?[;,]\\s*', u'(', text)
+    text = re.sub(u'\\(\\s*\\)', u'', text)
+    return re.sub(u' {2,}', u' ', text)
+
+
 class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
     xmlFile = 'script-cih-person.xml'
     path = util.ADDON.getAddonInfo('path')
@@ -144,6 +159,7 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
     height = 1080
 
     HOME_BUTTON_ID = 201
+    SEARCH_BUTTON_ID = 202
     INFO_BUTTON_ID = 301
     PLAY_BUTTON_ID = 302
     SHUFFLE_BUTTON_ID = 303
@@ -215,7 +231,8 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
         mli.setProperty('thumb.fallback', 'script.plex/thumb_fallbacks/{0}.png'.format(entry['type'] == 'show' and 'show' or 'movie'))
         obj = entry.get('obj')
         if obj is not None:
-            mli.setBoolProperty('owned', True)
+            if entry['kind'] == 'discover':
+                mli.setBoolProperty('owned', True)  # the gold check: this title is in your library
             if obj.TYPE == 'show':
                 if not obj.isWatched:
                     mli.setProperty('unwatched.count', u'{0}'.format(obj.unViewedLeafCount) or '')
@@ -322,7 +339,7 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
         if profile.get('knownFor'):
             bits.append(profile['knownFor'])
         self.setProperty('artist.genre', u'  •  '.join(bits))
-        self.setProperty('summary', (profile.get('summary') or u'').replace(u'\xa0', u' ').split(u'\n\nDescription above')[0])
+        self.setProperty('summary', cleanSummary(profile.get('summary')))
 
     def onAction(self, action):
         try:
@@ -353,6 +370,8 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
             self.playOwned(True)
         elif controlID == self.INFO_BUTTON_ID:
             self.showBio()
+        elif controlID == self.SEARCH_BUTTON_ID:
+            self.processCommand(search.dialog(self))
         elif controlID == self.MORE_BUTTON_ID:
             self.optionsClicked()
 
@@ -413,12 +432,12 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
         check = 'script.plex/indicators/check.png'
         options = []
         for key, label in SORTS:
-            options.append({'key': 'sort:' + key, 'display': u'Sort library row: ' + label, 'indicator': self.sortMode == key and check or ''})
+            options.append({'key': 'sort:' + key, 'display': u'Sort: ' + label, 'indicator': self.sortMode == key and check or ''})
         options.append(dropdown.SEPARATOR)
-        options.append({'key': 'unwatched', 'display': u'Library row: unwatched only', 'indicator': self.unwatchedOnly and check or ''})
+        options.append({'key': 'unwatched', 'display': u'Unwatched only', 'indicator': self.unwatchedOnly and check or ''})
         if getattr(self, 'appearanceCount', 0):
-            options.append({'key': 'appearances', 'display': u'Appearances ({0}) – {1}'.format(
-                self.appearanceCount, self.showAppearances and u'hide' or u'show')})
+            options.append({'key': 'appearances', 'display': self.showAppearances and u'Hide appearances' or
+                            u'Show appearances ({0})'.format(self.appearanceCount)})
         choice = dropdown.showDropdown(options, (930, 640), pos_is_bottom=False)
         if not choice:
             return
@@ -433,5 +452,6 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
             self.showAppearances = not self.showAppearances
             self.fill(APPEARANCES_LIST, u'Appearances', self.appearances if self.showAppearances else [])
             if self.showAppearances:
+                xbmc.sleep(250)  # the row has to be visible before the list scrolls to the focus
                 self.setFocusId(APPEARANCES_LIST)
 

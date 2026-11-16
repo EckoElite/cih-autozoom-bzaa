@@ -5,6 +5,10 @@ files. This pulls the add-on's skin folder and the ScopeNox Font.xml from the Sh
 originals (restoring them first where a file is already patched, so the result never depends on how often it ran), and
 pushes the result back. It never touches anything outside script.plexmod and the skin's font files.
 
+Besides the screen, font and dropdown fixes it also installs the emoji-capable font (build_emoji_font.py), the emoji
+filter (patch_emoji.py) and the person page (person/, patch_person.py). Building the font needs `pip install fonttools`
+for the Python that runs this script.
+
 usage: python reapply.py [--no-push] [--workdir DIR]
   The Shield is taken from ../../.env (SHIELD_IP, SHIELD_ADB_PORT). Stop Kodi first (the script does, with
   `am force-stop`) and start it again afterwards; PM4K takes about a minute to appear.

@@ -2,6 +2,18 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-16 (later): person page built and checked on the Shield
+
+Clicking a cast, director or writer entry that has a Plex person key now opens a Plex-style person page (entries without a key keep the old per-section grid). Files: `players/pm4k-osd/person/person.py` (window and data, installed as `lib/windows/person.py`), `person/make_person_xml.py` (builds `script-cih-person.xml` from PM4K's own artist and movie screens, so it follows the theme and fonts), `patch_person.py` (installs the module, patches `lib/windows/mixins/roles.py`); `reapply.py`, `scale_ui.py` and `apply_font.py` handle the new file. The skin file is named `script-cih-*` on purpose: PM4K re-renders every screen (undoing the patches) when its count of `script-plex-*.xml` files differs from its templates.
+
+Data: Plex Discover `/library/people/<tagKey>` (profile), `/credits` (groups), `/person_known_for`, plus the server's own `/library/people/<tagKey>/media` (everything you own with that person across sections, with watched state and progress). Owned titles in the filmography are matched by `plex://<type>/<ratingKey>`.
+
+Page: photo, name, born / place / known for, biography (CJK spellings removed: the font cannot draw them), round buttons (info, Play all, Shuffle, options, home, search), rows In your library, Known for, Upcoming, one row per credit group, Appearances (hidden until chosen in the options menu). Gold check on owned titles in the other rows, year and role under each title. Owned titles open normally; titles you do not own open PM4K's Watchlist detail page. Options menu: sort the library row (newest, oldest, title, rating), unwatched only, show or hide Appearances. Play all and Shuffle build one server play queue from the owned movies (shows are left out).
+
+Verified on the Shield (screenshots, 2026-11-16): Michelle Yeoh (from Everything Everywhere All at Once) and Daniel Kwan (director) open; all rows scroll into view with titles; owned title opens and Back returns; unowned Known-for title (Sunshine) opens the Watchlist page; options menu, Sort: Title reorders, Show appearances works; Shuffle started playback from the page (the log shows the streams opening) and stop returned to the page.
+
+Not checked: Play (not Shuffle), Sort oldest / rating, Unwatched only, a show's cast, a managed account, a person with no Discover data, long-term memory use with the biggest filmographies (rows are capped at 120 items). The first-row bio can show half a line at its bottom edge, as on the artist page.
+
 ## 2026-11-16: actor page review (research only, nothing changed on the Shield)
 
 Wrote `docs/ACTOR_PAGE_REVIEW.md`: how Plex's own person pages work (data from `discover.provider.plex.tv`, keyed by the cast entry's `tagKey`), read-only checks against this account (profile, credits, related hubs, known-for all answer; credits match library items by `plex://<type>/<ratingKey>`), what PM4K does today (cast click opens a per-section filtered grid, no photo or bio), and three options (merged grid, Plex-like page, full copy). The official support article returned 403, so its details come from search excerpts, a forum thread and a reverse-engineered Plezy pull request.

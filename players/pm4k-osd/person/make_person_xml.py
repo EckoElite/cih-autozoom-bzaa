@@ -23,6 +23,8 @@ TEMPLATE_LIST = "403"
 TEMPLATE_GROUP = "503"
 OUT = "script-cih-person.xml"
 GOLD = "FFE5A00D"
+ROWS_VIEW_HEIGHT = "860"  # what is left of the 1080 rows below the slid-up header: the row list scrolls inside this
+ROW_HEIGHT = "560"  # the movie screen's 520, plus room for the second text line under each title
 
 
 def original(folder: Path, name: str) -> Path:
@@ -87,6 +89,7 @@ def make_row(template: ET.Element, index: int, list_id: int) -> ET.Element:
     if index < len(ROW_IDS) - 1:
         text = re.sub(r"(<onup>\d+</onup>)", rf"\1<ondown>{list_id + 1}</ondown>", text, count=1)
     row = ET.fromstring(text)
+    row.find("height").text = ROW_HEIGHT
     return row
 
 
@@ -104,12 +107,18 @@ def build(folder: Path) -> str:
         if node.text and node.text.strip() in ("400", "401"):
             node.text = "400"
 
+    # slide the header out of the way as soon as any row has focus (the artist screen does it from the second row on), so
+    # the focused row's titles are on the screen
+    for anim in block.findall("animation"):
+        if "hub.focus" in (anim.get("condition") or ""):
+            anim.set("condition", "!String.IsEmpty(Window.Property(hub.focus))")
+
     template = find_control(movie, TEMPLATE_GROUP)
     row_font = "font13"
     rows_holder = copy.deepcopy(find_control(movie, "60"))
     for old in rows_holder.findall("control"):
         rows_holder.remove(old)
-    for tag, value in (("posx", "0"), ("posy", "585")):
+    for tag, value in (("posx", "0"), ("posy", "585"), ("height", ROWS_VIEW_HEIGHT)):
         node = rows_holder.find(tag)
         if node is None:
             node = ET.SubElement(rows_holder, tag)
