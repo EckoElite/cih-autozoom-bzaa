@@ -2,6 +2,14 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-16 (evening): second lines scroll, watchlist feedback, button names
+
+1. Person page: the line under each title (year and role) is now a copy of the title label, so it scrolls in the focused item exactly when the title does. Checked on a long item (Star Trek: Section 31: both lines scroll together).
+2. Watchlist button (movie page and the watchlist variant): while it has focus it shows "Add to watchlist" or "In watchlist"; after a click, in gold, "Added to watchlist" or "Removed from watchlist". The feedback is the window property `wl.feedback`, set after a successful add or remove and cleared whenever PM4K checks the item's watchlist state (opening the page, coming back to it), so it falls back to the real state. `patch_watchlist.py` edits `lib/windows/mixins/watchlist.py` (two lines; original kept as `watchlist.py.cih-orig`). Checked on the Shield: add then remove on Everything Everywhere All at Once showed both messages; leaving and reopening after an add showed "In watchlist". The title is back off the watchlist as it was (I added and removed it to test).
+3. Button names: `button_hints.py` appends one label per button to the end of the button row, visible only while that button has focus, so the name sits right after the last icon (Info, Play, Trailer, Versions, Audio and subtitles, More; on the watchlist variant Checking availability, Choose where to watch, Not in your library). The person page row has Biography, Play all, Shuffle, Sort and filter. Applied to the movie screen, its watchlist variant and the person page only; show, season, episode, artist and library screens are unchanged. The row is widened to 1500 so it never scrolls when the label appears.
+
+Not checked: the Versions label (needs a title with several versions), "Checking availability" and "Choose where to watch" (transient states).
+
 ## 2026-11-16 (later): person page built and checked on the Shield
 
 Clicking a cast, director or writer entry that has a Plex person key now opens a Plex-style person page (entries without a key keep the old per-section grid). Files: `players/pm4k-osd/person/person.py` (window and data, installed as `lib/windows/person.py`), `person/make_person_xml.py` (builds `script-cih-person.xml` from PM4K's own artist and movie screens, so it follows the theme and fonts), `patch_person.py` (installs the module, patches `lib/windows/mixins/roles.py`); `reapply.py`, `scale_ui.py` and `apply_font.py` handle the new file. The skin file is named `script-cih-*` on purpose: PM4K re-renders every screen (undoing the patches) when its count of `script-plex-*.xml` files differs from its templates.

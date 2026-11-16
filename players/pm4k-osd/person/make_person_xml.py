@@ -18,6 +18,11 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import button_hints  # noqa: E402  (players/pm4k-osd/button_hints.py)
+
+PERSON_HINTS = {"301": "Biography", "302": "Play all", "303": "Shuffle", "304": "Sort and filter"}
+
 ROW_IDS = list(range(400, 409))  # list ids; the row groups are 100 higher
 TEMPLATE_LIST = "403"
 TEMPLATE_GROUP = "503"
@@ -57,11 +62,14 @@ def badge_and_subtitle(layout: ET.Element, label_font: str) -> None:
             continue
         group = parents[node]
         posy = float(child_text(node, "posy") or 0)
-        sub = ET.fromstring(
-            f'<control type="label"><scroll>false</scroll><posx>0</posx><posy>{posy + 32:g}</posy><width>244</width>'
-            f"<height>30</height><font>{label_font}</font><align>center</align><textcolor>FFDDDDDD</textcolor>"
-            f"<label>$INFO[ListItem.Label2]</label></control>"
-        )
+        # a copy of the title label (so the second line scrolls when it is too long, exactly when the title does)
+        sub = copy.deepcopy(node)
+        for tag, value in (("posy", f"{posy + 32:g}"), ("height", "30"), ("font", label_font), ("textcolor", "FFDDDDDD"),
+                           ("label", "$INFO[ListItem.Label2]")):
+            element = sub.find(tag)
+            if element is None:
+                element = ET.SubElement(sub, tag)
+            element.text = value
         badge = ET.fromstring(
             '<control type="group"><visible>!String.IsEmpty(ListItem.Property(owned))</visible><posx>0</posx><posy>0</posy>'
             '<control type="image"><posx>0</posx><posy>0</posy><width>36</width><height>36</height>'
@@ -112,6 +120,11 @@ def build(folder: Path) -> str:
     for anim in block.findall("animation"):
         if "hub.focus" in (anim.get("condition") or ""):
             anim.set("condition", "!String.IsEmpty(Window.Property(hub.focus))")
+
+    # the names of the round buttons, shown while one has focus (the row starts where it did when it was centred)
+    row = find_control(block, "300")
+    button_hints.add_hints(row, PERSON_HINTS, watchlist=False)
+    button_hints.widen(row, align_left_at="621")
 
     template = find_control(movie, TEMPLATE_GROUP)
     row_font = "font13"
