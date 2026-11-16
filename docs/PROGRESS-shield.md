@@ -2,6 +2,15 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-17 (evening): long-press menu with the watchlist entry, and a watchlist mark on posters (person page)
+
+Scope as chosen by the user: actor (person) page rows only. Library grids, home rows and search are unchanged (the library grid already has PM4K's own long-press menu, without a watchlist entry).
+
+- Long press on a title in any row: "Choose action for: <title> (<year>)" with Mark Played / Mark Unplayed (titles you own, same conditions as the library grid) and "Add to watchlist" or "Remove from watchlist" by the title's real state (read from Plex Discover `userState` when the menu opens). After the choice a pop-up says "Added to watchlist" / "Removed from watchlist", and the mark below is updated in every row that has the title.
+- Mark on the poster: titles on the watchlist get a dark badge with a gold bookmark, below the gold check when the title is also in your library, or in the top-left corner when it is not. The watchlist is read once when the page opens (all pages of `/library/sections/watchlist/all`, 100 per request; 61 titles at the moment).
+
+Checked on the Shield, with the context-menu key: menu on Sunshine (which is in the library), Add to watchlist: pop-up and both badges appeared; menu again showed Remove from watchlist; removing it took the badge away; the account's watchlist is back to its 61 titles. An unowned title on the watchlist in another row showed the bookmark in the corner. NOT checked: the Shield remote's own long press of OK. `adb input keyevent --longpress` only produced an ordinary click (the title's page opened), so I cannot tell from here whether the remote's long press reaches the page as the context-menu action, which is what the existing grid menu relies on; Mark Played / Unplayed were not clicked.
+
 ## 2026-11-17 (later): "Removed from watchlist" flashed before "Added to watchlist"
 
 Cause: on a click, PM4K first flipped the bookmark state (hiding the "add" button and showing the "added" one) and only then did my patch set `wl.feedback`; for a moment the old feedback ("removed") was still set while the "add" button still had focus, so its label read "Removed from watchlist". Fix: `patch_watchlist.py` now sets `wl.feedback` before the state flips (it also migrates the first version of the patch on the Shield), and the labels in `button_hints.py` match the feedback value exactly (add button: empty or "removed"; added button: empty or "added"), so a half-updated moment shows no text instead of the wrong text. Checked on Sunshine: add, remove, add again, with captures about a second after the click showed "Added to watchlist" at once; a flash shorter than that cannot be seen with screenshots, so this part rests on the ordering change. The title was removed from the watchlist again afterwards.

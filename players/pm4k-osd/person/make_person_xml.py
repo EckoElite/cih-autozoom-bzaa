@@ -78,10 +78,28 @@ def badge_and_subtitle(layout: ET.Element, label_font: str) -> None:
             '<texture colordiffuse="FF000000" fallback="script.plex/indicators/watched_2024.png">script.plex/indicators/watched_2024.png</texture></control>'
             "</control>"
         )
+        # on the watchlist: a dark badge with a gold bookmark, under the gold check when the title is also in the library
+        marks = []
+        for condition, top in (
+            ("!String.IsEmpty(ListItem.Property(watchlisted)) + !String.IsEmpty(ListItem.Property(owned))", 38),
+            ("!String.IsEmpty(ListItem.Property(watchlisted)) + String.IsEmpty(ListItem.Property(owned))", 0),
+        ):
+            marks.append(
+                ET.fromstring(
+                    f'<control type="group"><visible>{condition}</visible><posx>0</posx><posy>{top}</posy>'
+                    '<control type="image"><posx>0</posx><posy>0</posy><width>36</width><height>36</height>'
+                    '<texture colordiffuse="CC000000">script.plex/white-square-bl-rounded_w.png</texture></control>'
+                    # the button icon is a 180 x 145 picture with a small bookmark in its middle: drawn at 45% so that the
+                    # bookmark itself is about 18 x 22 and centred on the badge
+                    '<control type="image"><posx>-22.5</posx><posy>-14.5</posy><width>81</width><height>65</height>'
+                    f'<texture colordiffuse="{GOLD}">script.plex/buttons/player/modern/watchlisted.png</texture></control>'
+                    "</control>"
+                )
+            )
         items = list(group)
         at = items.index(node)
-        group.insert(at + 1, sub)
-        group.insert(at + 2, badge)
+        for offset, extra in enumerate([sub, badge, *marks], start=1):
+            group.insert(at + offset, extra)
 
 
 def make_row(template: ET.Element, index: int, list_id: int) -> ET.Element:

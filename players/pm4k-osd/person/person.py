@@ -71,6 +71,44 @@ def discoverJson(path):
         return None
 
 
+def watchlistState(ratingKey):
+    """True when the title is on the Plex watchlist, False when not, None when Plex could not be asked"""
+    data = discoverJson('/library/metadata/{0}/userState'.format(ratingKey))
+    if data is None:
+        return None
+    for state in data.get('UserState') or []:
+        return bool(state.get('watchlistedAt'))
+    return False
+
+
+def watchlistKeys(limit=1000):
+    """the Plex rating keys of everything on the account's watchlist (for the bookmark on posters); empty on failure"""
+    keys = set()
+    start = 0
+    while start < limit:
+        data = discoverJson('/library/sections/watchlist/all?X-Plex-Container-Start={0}&X-Plex-Container-Size=100'.format(start))
+        if not data:
+            break
+        for md in data.get('Metadata') or []:
+            keys.add(u'{0}'.format(md.get('ratingKey')))
+        start += 100
+        if start >= (data.get('totalSize') or 0):
+            break
+    return keys
+
+
+def setWatchlist(ratingKey, add):
+    try:
+        server = pnUtil.SERVERMANAGER.getDiscoverServer()
+        server.query('/actions/{0}'.format('addToWatchlist' if add else 'removeFromWatchlist'),
+                     ratingKey=ratingKey, method='put')
+        pnUtil.APP.trigger('watchlist:modified')
+        return True
+    except Exception:
+        util.ERROR()
+        return False
+
+
 def ownedItems(key):
     """everything in the libraries of the selected server with this person, across all sections"""
     try:
@@ -180,6 +218,7 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
         self.credits = {}
         self.knownFor = []
         self.profile = {}
+        self.watchlist = set()
         self.groups = []
         self.lists = {}
         self.loaded = False
@@ -197,6 +236,7 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
         known = discoverJson('/library/people/{0}/person_known_for'.format(self.key)) or {}
         self.knownFor = known.get('Metadata') or []
         self.owned = ownedItems(self.key)
+        self.watchlist = watchlistKeys()
         return bool(self.profile or self.groups or self.owned)
 
     def ownedByGuid(self):
@@ -229,6 +269,7 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
             sub = u'{0}  •  {1}'.format(entry['year'], entry['role'])
         mli = kodigui.ManagedListItem(entry['title'], sub, thumbnailImage=thumb, data_source=entry)
         mli.setProperty('thumb.fallback', 'script.plex/thumb_fallbacks/{0}.png'.format(entry['type'] == 'show' and 'show' or 'movie'))
+        mli.setBoolProperty('watchlisted', u'{0}'.format(entry['guid']).rsplit('/', 1)[-1] in self.watchlist)
         obj = entry.get('obj')
         if obj is not None:
             if entry['kind'] == 'discover':
@@ -343,6 +384,9 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
 
     def onAction(self, action):
         try:
+            if action == xbmcgui.ACTION_CONTEXT_MENU and self.lastFocusID in ALL_LISTS:
+                self.itemMenu(self.lastFocusID)  # a long press on a title: its actions instead of its page
+                return
             if action in (xbmcgui.ACTION_MOVE_LEFT, xbmcgui.ACTION_MOVE_RIGHT) and self.lastFocusID in ALL_LISTS:
                 mli = self.lists[self.lastFocusID].getSelectedItem()
                 entry = mli.dataSource if mli else None
@@ -396,6 +440,69 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
             raise
         except Exception:
             util.ERROR(u'Could not open {0}'.format(entry.get('title')), notify=True, time_ms=4000)
+
+    def itemMenu(self, listId):
+        """long press on a title: Mark Played / Unplayed (titles you own) and the watchlist entry, as on the title's page"""
+        mli = self.lists[listId].getSelectedItem()
+        if not mli or not mli.dataSource:
+            return
+        entry = mli.dataSource
+        obj = entry.get('obj')
+        ratingKey = u'{0}'.format(entry['guid']).rsplit('/', 1)[-1]
+        onWatchlist = None
+        if u'{0}'.format(entry['guid']).startswith('plex://'):  # titles matched by an older agent have no Plex watchlist entry
+            onWatchlist = busy.widthDialog(watchlistState, '', ratingKey, delay=True)
+
+        options = []
+        if obj is not None:
+            partial = obj.TYPE == 'show' and 0 < obj.unViewedLeafCount < obj.leafCount
+            if not mli.getProperty('watched'):
+                options.append({'key': 'mark_watched', 'display': u'Mark Played'})
+            if obj.isFullyWatched or obj.isWatched or partial:
+                options.append({'key': 'mark_unwatched', 'display': u'Mark Unplayed'})
+        if onWatchlist is not None:
+            options.append({'key': 'watchlist', 'display': onWatchlist and u'Remove from watchlist' or u'Add to watchlist'})
+        if not options:
+            util.showNotification(u'Watchlist not available right now')
+            return
+
+        title = u'{0} ({1})'.format(entry['title'], entry['year']) if entry['year'] else entry['title']
+        choice = dropdown.showDropdown(options, pos=(660, 441), close_direction='none', set_dropdown_prop=False,
+                                       header=u'Choose action for: {0}'.format(title), align_items='left')
+        if not choice:
+            return
+        key = choice['key']
+        if key == 'watchlist':
+            if setWatchlist(ratingKey, not onWatchlist):
+                util.showNotification(u'Removed from watchlist' if onWatchlist else u'Added to watchlist')
+                if onWatchlist:
+                    self.watchlist.discard(ratingKey)
+                else:
+                    self.watchlist.add(ratingKey)
+                for control in self.lists.values():  # the same title can be in several rows
+                    for other in control.items:
+                        if other.dataSource and u'{0}'.format(other.dataSource['guid']).rsplit('/', 1)[-1] == ratingKey:
+                            other.setBoolProperty('watchlisted', not onWatchlist)
+            else:
+                util.showNotification(u'Could not change the watchlist')
+        elif key in ('mark_watched', 'mark_unwatched'):
+            try:
+                if key == 'mark_watched':
+                    obj.markWatched()
+                else:
+                    obj.markUnwatched()
+            except Exception:
+                util.ERROR(u'Could not change the played state', notify=True, time_ms=3000)
+                return
+            watched = key == 'mark_watched'
+            entry['watched'] = watched
+            mli.setBoolProperty('watched', watched)
+            mli.setProperty('progress', '')
+            if obj.TYPE == 'show':
+                mli.setProperty('unwatched.count', '' if watched else u'{0}'.format(obj.leafCount))
+            else:
+                mli.setProperty('unwatched', '' if watched else '1')
+            util.MONITOR.watchStatusChanged()
 
     def playOwned(self, shuffle):
         movies = [e['obj'] for e in self.sortedLibrary() if e['type'] == 'movie']
