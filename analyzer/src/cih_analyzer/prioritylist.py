@@ -82,7 +82,11 @@ def apply_priority_list(
             summary.done += 1
         elif status in ("skipped", "missing", "error"):
             summary.left_alone += 1
-        elif status == "running" or (status == "queued" and row["priority"] <= PRIORITY_MEDIUM):
+        elif (
+            status == "running"
+            or (status == "queued" and row["priority"] <= PRIORITY_MEDIUM)
+            or (status == "queued" and row["rank"] is not None)  # placed by hand: where the user put it stays
+        ):
             summary.waiting += 1
         elif store.requeue(local, PRIORITY_MEDIUM, now):
             if status == "queued":

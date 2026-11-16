@@ -206,3 +206,33 @@ def test_without_a_priority_list_there_is_nothing_to_read(tmp_path):
     assert client.post("/api/v1/priority-list/read").status_code == 409
     assert client.get("/api/v1/status").json()["settings"]["priority_list"] is None
     store.close()
+
+
+def test_an_episode_that_stays_on_the_list_for_days_is_queued_once_and_never_again(store, tmp_path):
+    path = add(store, "Show.S01E01.Pilot.mkv")
+    f = listing(tmp_path, LISTED)
+    assert apply_priority_list(f, store, PathMap(), NOW).queued == 1  # day 1: queued
+    second = apply_priority_list(f, store, PathMap(), NOW + 86400)  # day 2: still waiting
+    assert (second.queued, second.raised, second.waiting) == (0, 0, 1)
+    store.claim_next()
+    store.finish(
+        path, timeline_json="{}", ramp_raw_json=None, quick_hash="a" * 40, version="0.3.21",
+        flags=[], segments=1, duration_s=1.0, now=NOW + 90000,
+    )  # fmt: skip
+    third = apply_priority_list(f, store, PathMap(), NOW + 2 * 86400)  # day 3: processed
+    assert (third.queued, third.raised, third.waiting, third.done) == (0, 0, 0, 1)
+    assert store.get(path)["status"] == "done" and store.get(path)["analyzed_at"] == NOW + 90000
+    store._run("UPDATE files SET status='error', error='x' WHERE path=?", (path,))
+    assert (
+        apply_priority_list(f, store, PathMap(), NOW + 3 * 86400).queued == 0
+    )  # a failed one is not retried daily
+
+
+def test_an_episode_the_user_placed_lower_by_hand_is_not_moved_back_up(store, tmp_path):
+    path = add(store, "Show.S01E01.Pilot.mkv")
+    f = listing(tmp_path, LISTED)
+    apply_priority_list(f, store, PathMap(), NOW)
+    assert store.place([path], PRIORITY_LOW, end=True) == 1  # dragged down on the status page
+    again = apply_priority_list(f, store, PathMap(), NOW + 86400)
+    assert (again.raised, again.waiting) == (0, 1)
+    assert store.get(path)["priority"] == PRIORITY_LOW
