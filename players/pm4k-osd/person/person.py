@@ -390,7 +390,8 @@ class PersonWindow(kodigui.ControlledWindow, windowutils.UtilMixin):
             obj = server.getObject('/library/metadata/{0}'.format(entry['md'].get('ratingKey')))
             if obj is None:
                 raise ValueError('no object')
-            self.openItem(obj, from_watchlist=True, directly_from_watchlist=True, external_item=True)
+            # not directly_from_watchlist: PM4K then takes the title for one that is on the watchlist and skips checking
+            self.openItem(obj, from_watchlist=True, external_item=True)
         except util.NoDataException:
             raise
         except Exception:

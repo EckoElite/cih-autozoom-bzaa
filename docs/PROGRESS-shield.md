@@ -2,6 +2,10 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-17: unowned titles opened from the person page showed "In watchlist"
+
+Cause (mine): `person.py` opened titles you do not own with `directly_from_watchlist=True`, copied from the library screen's watchlist grid. PM4K reads that as "this title came from your watchlist": it marks it watchlisted and skips the check. Fix: pass only `from_watchlist` and `external_item` (as the home screen's watchlist rows do), so PM4K asks Plex for the real state. Checked: Sunshine (not on the watchlist according to Plex's `userState`) now opens with the outlined bookmark and "Add to watchlist". Owned titles were never affected.
+
 ## 2026-11-16 (evening): second lines scroll, watchlist feedback, button names
 
 1. Person page: the line under each title (year and role) is now a copy of the title label, so it scrolls in the focused item exactly when the title does. Checked on a long item (Star Trek: Section 31: both lines scroll together).
