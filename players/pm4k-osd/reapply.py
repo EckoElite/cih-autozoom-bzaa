@@ -113,6 +113,9 @@ def main(argv: list[str]) -> int:
     (plex / "lib" / "windows" / "mixins").mkdir(parents=True, exist_ok=True)
     adb("pull", f"{PM4K}/lib/windows/mixins/roles.py", str(plex / "lib" / "windows" / "mixins" / "roles.py"))
     adb("pull", f"{PM4K}/lib/windows/mixins/roles.py.cih-orig", str(plex / "lib" / "windows" / "mixins" / "roles.py.cih-orig"), check=False)
+    for name in ("preplay.py", "subitems.py", "episodes.py"):  # their cast click is patched by patch_person.py
+        adb("pull", f"{PM4K}/lib/windows/{name}", str(plex / "lib" / "windows" / name))
+        adb("pull", f"{PM4K}/lib/windows/{name}.cih-orig", str(plex / "lib" / "windows" / (name + ".cih-orig")), check=False)
     adb("pull", f"{PM4K}/lib/windows/mixins/watchlist.py", str(plex / "lib" / "windows" / "mixins" / "watchlist.py"))
     adb("pull", f"{PM4K}/lib/windows/mixins/watchlist.py.cih-orig", str(plex / "lib" / "windows" / "mixins" / "watchlist.py.cih-orig"), check=False)
     adb("pull", f"{PM4K}/lib/windows/kodigui.py", str(plex / "lib" / "windows" / "kodigui.py"))
@@ -145,6 +148,8 @@ def main(argv: list[str]) -> int:
     adb("push", str(plex / "lib" / "windows" / "kodigui.py"), f"{PM4K}/lib/windows/kodigui.py")
     adb("push", str(plex / "lib" / "windows" / "person.py"), f"{PM4K}/lib/windows/person.py")
     adb("push", str(plex / "lib" / "windows" / "mixins" / "roles.py"), f"{PM4K}/lib/windows/mixins/roles.py")
+    for name in ("preplay.py", "subitems.py", "episodes.py"):
+        adb("push", str(plex / "lib" / "windows" / name), f"{PM4K}/lib/windows/{name}")
     adb("push", str(plex / "lib" / "windows" / "mixins" / "watchlist.py"), f"{PM4K}/lib/windows/mixins/watchlist.py")
     push_fonts(work)
     print("pushed; start Kodi (adb shell am start -n org.xbmc.kodi.cih/.Splash)")

@@ -46,12 +46,16 @@ def log(msg, *args):
 
 
 def personKey(role):
-    """Plex's cross-server key for a cast, director or writer entry ('' when the server has none)"""
+    """Plex's cross-server key for a cast, director or writer entry ('' when there is none): the `tagKey` of a title in
+    your library, or the person's own id on a Discover title (its `key` is /library/people/<id>)"""
     try:
-        key = u'{0}'.format(role.get('tagKey') or '')
+        for attribute in ('tagKey', 'key', 'id'):
+            key = u'{0}'.format(role.get(attribute) or '').rsplit('/', 1)[-1]
+            if len(key) >= 20:
+                return key
     except Exception:
-        key = ''
-    return key if len(key) >= 20 else ''
+        pass
+    return ''
 
 
 def discoverJson(path):
@@ -175,7 +179,7 @@ def thumbUrl(server, url, dim):
         return url
 
 
-NO_GLYPH = re.compile(u'[⺀-鿿가-힯豈-﫿＀-￯]+')
+NO_GLYPH = re.compile(u'[԰-᳿⺀-鿿가-힯豈-﫿יִ-﷿ﹰ-﻿＀-￯]+')
 
 
 def cleanSummary(text):

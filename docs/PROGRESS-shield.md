@@ -2,6 +2,13 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-18: clicking a cast member sometimes did nothing
+
+Cause: on titles you do not own (opened from the watchlist or from the person page's Known for / filmography) PM4K's movie, show and episode screens ignore a click on the cast row on purpose (`if self.fromWatchlist: return` in `preplay.py`, `episodes.py` twice, `subitems.py`), because its old per-section grid needs a library title. Clicks on titles in your library always worked (8 of 8 cast clicks on a library movie opened the page).
+Fix: `patch_person.py` now also removes those guards, and `personKey()` accepts the id that Discover puts on a person (`key` = `/library/people/<id>`; Discover titles have no `tagKey`). `mixins/roles.py` gets one more guard so that a title without a person key from the watchlist still does nothing instead of failing. `reapply.py` pulls and pushes `preplay.py`, `subitems.py`, `episodes.py`. Checked: Memoirs of a Geisha (not in the library): clicking Zhang Ziyi opens her page.
+Not fixed: the few library cast entries that have no `tagKey` (5 of 3505 in a sample: P90X, Tony Horton, Culture Club, a YouTube channel in Extras, Exercise and Music Videos) still use the old per-section grid, which can do nothing when the name search finds no section. Rare, left as it is.
+Also: biographies now drop Armenian, Hebrew, Arabic, Persian, Indian and other scripts the font cannot draw (Persian spelling showed as boxes), as well as Chinese, Japanese and Korean.
+
 ## 2026-11-17 (evening): long-press menu with the watchlist entry, and a watchlist mark on posters (person page)
 
 Scope as chosen by the user: actor (person) page rows only. Library grids, home rows and search are unchanged (the library grid already has PM4K's own long-press menu, without a watchlist entry).
