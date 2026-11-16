@@ -126,12 +126,14 @@ def main(argv: list[str]) -> int:
         stale.unlink()  # the person page is built again from the restored screens below
     print(run("person/make_person_xml.py", str(skin)).strip())
     print("; ".join(run("button_hints.py", str(skin)).strip().splitlines()))
+    print(run("ratio_chip.py", str(skin)).strip())
     print(run("scale_ui.py", str(skin)).strip().splitlines()[-1])
     print(run("apply_osd_margin.py", str(skin)).strip().splitlines()[-1])
     print(run("apply_font.py", str(skin), str(fonts)).strip().splitlines()[0])
     print(run("patch_dropdown.py", str(plex)).strip().splitlines()[-1])
     print(run("patch_emoji.py", str(plex)).strip().splitlines()[-1])
     print(run("patch_person.py", str(plex)).strip().splitlines()[-1])
+    print(run("patch_ratio.py", str(plex)).strip().splitlines()[-1])
     print(run("patch_watchlist.py", str(plex)).strip().splitlines()[-1])
     for backup in skin.glob("script-cih-*.cih-orig"):
         backup.unlink()
@@ -147,6 +149,7 @@ def main(argv: list[str]) -> int:
     adb("push", str(plex / "lib" / "windows" / "dropdown.py"), f"{PM4K}/lib/windows/dropdown.py")
     adb("push", str(plex / "lib" / "windows" / "kodigui.py"), f"{PM4K}/lib/windows/kodigui.py")
     adb("push", str(plex / "lib" / "windows" / "person.py"), f"{PM4K}/lib/windows/person.py")
+    adb("push", str(plex / "lib" / "windows" / "cihratio.py"), f"{PM4K}/lib/windows/cihratio.py")
     adb("push", str(plex / "lib" / "windows" / "mixins" / "roles.py"), f"{PM4K}/lib/windows/mixins/roles.py")
     for name in ("preplay.py", "subitems.py", "episodes.py"):
         adb("push", str(plex / "lib" / "windows" / name), f"{PM4K}/lib/windows/{name}")

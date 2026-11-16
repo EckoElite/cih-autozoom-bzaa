@@ -2,6 +2,14 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-18 (later): aspect-ratio tag on the movie page
+
+The Audio / Subtitles row of the movie page now ends with ASPECT and a value for every title the analyzer has finished: "2.39:1" for one ratio, "VAR 2.39 / 1.85" for a variable-ratio title (every ratio that fills 3 % or more of the running time, longest first; 1.33 and 1.34 count as one). Titles the analyzer has not finished, or cannot be reached, get no tag; the page never asks the analyzer to analyse anything (no `analyze=1`).
+
+How: `ratio/cihratio.py` (installed as `lib/windows/cihratio.py`) asks `GET /api/v1/timeline` by part id, then rating key, in a background thread (3 s timeout, answers cached for an hour, misses for 2 minutes), using the analyzer address and key from the `service.cih.zoom` add-on's settings; `patch_ratio.py` makes `preplay.py` call it; `ratio_chip.py` adds the chip to the skin (the watchlist variant, for titles you do not own, is left alone). The first request can take a moment: the tag appears when the answer arrives.
+
+Checked on the Shield: Everything Everywhere All at Once (VAR 2.39 / 1.85), Wicked: For Good (2.39:1), Star Trek: Section 31 (2.39:1). The values for the first title are what the analyzer holds for it; whether "VAR 2.39 / 1.85" is the right summary of that film is the analyzer's measurement, not checked here. NOT done: shows, seasons and episodes (the request was the movie page), grids, and a title the analyzer has not seen (no tag, not looked at on the screen).
+
 ## 2026-11-18: clicking a cast member sometimes did nothing
 
 Cause: on titles you do not own (opened from the watchlist or from the person page's Known for / filmography) PM4K's movie, show and episode screens ignore a click on the cast row on purpose (`if self.fromWatchlist: return` in `preplay.py`, `episodes.py` twice, `subitems.py`), because its old per-section grid needs a library title. Clicks on titles in your library always worked (8 of 8 cast clicks on a library movie opened the page).
