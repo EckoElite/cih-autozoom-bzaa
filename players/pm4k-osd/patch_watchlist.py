@@ -13,17 +13,27 @@ usage: python patch_watchlist.py <script.plexmod folder> [--check]
 import sys
 from pathlib import Path
 
-EDITS = [
-    (
-        '            self.setBoolProperty("is_watchlisted", method == "addToWatchlist")\n',
-        '            self.setBoolProperty("is_watchlisted", method == "addToWatchlist")\n'
-        '            self.setProperty("wl.feedback", method == "addToWatchlist" and "added" or "removed")  # CIH\n',
-    ),
-    (
-        '            self.setBoolProperty("is_watchlisted", state)\n',
-        '            self.setBoolProperty("is_watchlisted", state)\n            self.setProperty("wl.feedback", "")  # CIH\n',
-    ),
-]
+FEEDBACK = '            self.setProperty("wl.feedback", method == "addToWatchlist" and "added" or "removed")  # CIH\n'
+STATE_LINE = '            self.is_watchlisted = method == "addToWatchlist"\n'
+BOOL_LINE = '            self.setBoolProperty("is_watchlisted", method == "addToWatchlist")\n'
+CLEAR = '            self.setProperty("wl.feedback", "")  # CIH\n'
+CHECKED = '            self.setBoolProperty("is_watchlisted", state)\n'
+
+
+def patch_text(text: str) -> tuple[str, bool]:
+    """returns the patched text and whether anything changed; raises ValueError when PM4K's code no longer fits"""
+    before = text
+    # first version of this patch put the feedback after the state change, which flashed the old message for a moment
+    text = text.replace(BOOL_LINE + FEEDBACK, BOOL_LINE)
+    if FEEDBACK + STATE_LINE not in text:
+        if text.count(STATE_LINE) != 1:
+            raise ValueError("self.is_watchlisted = method ... not found exactly once")
+        text = text.replace(STATE_LINE, FEEDBACK + STATE_LINE)
+    if CLEAR not in text:
+        if text.count(CHECKED) != 1:
+            raise ValueError("the state check callback was not found exactly once")
+        text = text.replace(CHECKED, CHECKED + CLEAR)
+    return text, text != before
 
 
 def main(argv: list[str]) -> int:
@@ -37,17 +47,20 @@ def main(argv: list[str]) -> int:
     text = path.read_bytes().decode("utf-8")
     crlf = "\r\n" in text
     text = text.replace("\r\n", "\n")
-    if "wl.feedback" in text:
+    if "--check" in argv[1:]:
+        try:
+            print("not patched" if patch_text(text)[1] else "patched")
+        except ValueError as err:
+            print(f"does not fit: {err}")
+        return 0
+    try:
+        text, changed = patch_text(text)
+    except ValueError as err:
+        print(f"STOPPED: this edit no longer fits watchlist.py: {err}")
+        return 1
+    if not changed:
         print("already patched")
         return 0
-    if "--check" in argv[1:]:
-        print("not patched")
-        return 0
-    for old, new in EDITS:
-        if text.count(old) != 1:
-            print(f"STOPPED: this edit no longer fits watchlist.py: {old[:60]!r}")
-            return 1
-        text = text.replace(old, new)
     backup = path.with_name(path.name + ".cih-orig")
     if not backup.exists():
         backup.write_bytes(path.read_bytes())

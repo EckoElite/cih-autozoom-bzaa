@@ -2,6 +2,10 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-17 (later): "Removed from watchlist" flashed before "Added to watchlist"
+
+Cause: on a click, PM4K first flipped the bookmark state (hiding the "add" button and showing the "added" one) and only then did my patch set `wl.feedback`; for a moment the old feedback ("removed") was still set while the "add" button still had focus, so its label read "Removed from watchlist". Fix: `patch_watchlist.py` now sets `wl.feedback` before the state flips (it also migrates the first version of the patch on the Shield), and the labels in `button_hints.py` match the feedback value exactly (add button: empty or "removed"; added button: empty or "added"), so a half-updated moment shows no text instead of the wrong text. Checked on Sunshine: add, remove, add again, with captures about a second after the click showed "Added to watchlist" at once; a flash shorter than that cannot be seen with screenshots, so this part rests on the ordering change. The title was removed from the watchlist again afterwards.
+
 ## 2026-11-17: unowned titles opened from the person page showed "In watchlist"
 
 Cause (mine): `person.py` opened titles you do not own with `directly_from_watchlist=True`, copied from the library screen's watchlist grid. PM4K reads that as "this title came from your watchlist": it marks it watchlisted and skips the check. Fix: pass only `from_watchlist` and `external_item` (as the home screen's watchlist rows do), so PM4K asks Plex for the real state. Checked: Sunshine (not on the watchlist according to Plex's `userState`) now opens with the outlined bookmark and "Add to watchlist". Owned titles were never affected.

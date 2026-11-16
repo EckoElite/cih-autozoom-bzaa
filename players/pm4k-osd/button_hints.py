@@ -41,10 +41,12 @@ MOVIE_HINTS = {
 # (condition, text, gold?) for the two watchlist buttons: 308 is shown when the title is not on the watchlist, 309 when it is
 WATCHLIST_HINTS = [
     ("Control.HasFocus(308) + String.IsEmpty(Window.Property(wl.feedback))", "Add to watchlist", False),
-    ("Control.HasFocus(308) + !String.IsEmpty(Window.Property(wl.feedback))", "Removed from watchlist", True),
+    ("Control.HasFocus(308) + String.IsEqual(Window.Property(wl.feedback),removed)", "Removed from watchlist", True),
     ("Control.HasFocus(309) + String.IsEmpty(Window.Property(wl.feedback))", "In watchlist", False),
-    ("Control.HasFocus(309) + !String.IsEmpty(Window.Property(wl.feedback))", "Added to watchlist", True),
+    ("Control.HasFocus(309) + String.IsEqual(Window.Property(wl.feedback),added)", "Added to watchlist", True),
 ]
+# a combination that does not match (the button list has changed but the feedback has not yet, or the other way round)
+# shows no text for that moment instead of the wrong one
 
 
 def number(node: ET.Element, tag: str) -> str | None:
