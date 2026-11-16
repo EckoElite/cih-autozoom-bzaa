@@ -105,7 +105,7 @@
     </div>
     <p id="pausebanner" class="banner" hidden></p>
     <div class="row">
-      <button id="scan">Scan media now</button><button id="plex">Sync Plex now</button>
+      <button id="scan">Scan media now</button><button id="plex">Sync Plex now</button><button id="plist" hidden title="Read the priority list file now and queue the episodes it names">Read priority list now</button>
     </div>
     <div class="row">
       <label>Files analysed at once <input type="number" id="workers" min="1" max="16" inputmode="numeric" style="width:4.5em"></label>
@@ -213,6 +213,14 @@ const seasonLine = (t) => {
   if (t.not_queued) rest.push(t.not_queued + " not queued yet");
   if (t.unreachable) rest.push(t.unreachable + " with no episode left to try");
   return " TV seasons with a sample episode: " + t.sampled + " of " + t.seasons + (rest.length ? " (" + rest.join(", ") + ")" : "") + ".";
+};
+// the file of paths another script keeps (read only), read every day: what the last read found
+const priorityLine = (cfg, last) => {
+  if (!cfg) return "";
+  if (!last) return " Priority list: not read yet (read at start and at " + cfg.times.join(", ") + ").";
+  if (last.error) return " Priority list: " + last.error + ".";
+  return " Priority list read " + when(last.at) + ": " + last.lines + " listed, " + last.matched + " found, " + last.queued +
+    " queued, " + last.raised + " moved up, " + last.done + " already analysed" + (last.unmatched ? ", " + last.unmatched + " not found (e.g. " + last.unmatched_examples.slice(0, 1).join("") + ")" : "") + ".";
 };
 const when = (t) => t ? new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
 const TIER = { 1: "Highest", 2: "High", 3: "Medium", 4: "Low" };
@@ -410,7 +418,8 @@ async function refresh() {
     $("sched").textContent = (sc.paused ? "" : "Running. ") + sc.busy + " of " + sc.workers + " worker(s) busy" +
       (sc.busy > sc.workers ? " (" + (sc.busy - sc.workers) + " finishing, then stopping)" : "") + ". " +
       (sc.last_scan ? "Last scan " + when(sc.last_scan.at) + " (" + sc.last_scan.seen + " files). " : "") +
-      (s.plex.enabled ? (sc.last_plex ? (sc.last_plex.error ? "Plex: " + sc.last_plex.error : "Plex synced " + when(sc.last_plex.at) + " (" + sc.last_plex.matched + " matched).") : "Plex not synced yet.") : "Plex not configured.") + seasonLine(s.seasons);
+      (s.plex.enabled ? (sc.last_plex ? (sc.last_plex.error ? "Plex: " + sc.last_plex.error : "Plex synced " + when(sc.last_plex.at) + " (" + sc.last_plex.matched + " matched).") : "Plex not synced yet.") : "Plex not configured.") + seasonLine(s.seasons) + priorityLine(s.settings.priority_list, sc.last_priority_list);
+    $("plist").hidden = !s.settings.priority_list;
 
     await loadUpNext();
 
@@ -556,6 +565,7 @@ $("stop").onclick = async () => {
   stopTimer = setTimeout(disarmStop, 6000);
 };
 $("scan").onclick = async () => { await json("/api/v1/scan", { method: "POST" }); note("Scan started"); };
+$("plist").onclick = async () => { try { await json("/api/v1/priority-list/read", { method: "POST" }); note("Reading the priority list"); } catch (e) { note(e.message, "bad"); } };
 $("plex").onclick = async () => { try { await json("/api/v1/plex-sync", { method: "POST" }); note("Plex sync started"); } catch (e) { note(e.message, "bad"); } };
 $("workers").oninput = () => { workersEdited = true; };
 $("setworkers").onclick = async () => {

@@ -2,6 +2,20 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-16: priority list from a text file another script keeps (0.3.21, not pushed yet)
+
+The user's cache-mover script writes `plexcache_mover_files_to_exclude.txt` (one `/mnt/cache_media/media/TV Shows/...` path per line, the shows being watched). Asked for: read it, match each line to a Plex episode the analyzer has, queue them; read only; a Docker variable for the file and one for the time of day. Chosen with the user: Medium tier (with the known-variable films), and also read at start and by a button.
+
+| Part | What was built |
+|---|---|
+| Settings | `PRIORITY_LIST_FILE` (container path, empty = off), `PRIORITY_LIST_TIME` (`HH:MM`, several comma separated, default 04:00, local time / `TZ`); template: variables plus a read-only *Priority list folder* path (mount the folder, not the file, so a replaced file is not missed) |
+| Reading | `prioritylist.py`: one `open(..., "r")` read of at most 8 MB, no lock, never written; blank lines and `#` comments dropped |
+| Matching | `PATH_MAP` first, else the same folder-and-file-name match used for Plex paths (`NameIndex`); two files that end alike at every depth are not guessed |
+| Queueing | no timeline and idle: queued Medium; queued lower: moved up (never down); running, queued Medium or higher, done, skipped, missing, failed: left alone; counts kept in `last_priority_list` |
+| When | at container start, every day at each `PRIORITY_LIST_TIME`, and `POST /api/v1/priority-list/read` (button "Read priority list now" on the status page, shown only when configured); the status page's Plex line reports the last read (listed, found, queued, moved up, already analysed, not found with an example) |
+
+Verified: 13 new tests (read only incl. a read-only file whose bytes and mtime are unchanged, matching by name and by PATH_MAP, apostrophes and commas, the tier rules, duplicates, unmatched examples, missing file, times and the wait to the next one, environment settings, scheduler and API); full suite 467 passed, 1 skipped; ruff clean. **Against the real data:** the user's actual file (132 paths) matched 132 of 132 against the container's real file list (status today: 122 idle, 9 done, 1 missing), so 122 would be queued by a first read. Not verified: a read from inside the container (the mount and the file's real location are the user's to set up), and the scheduler thread's timing over a real day.
+
 ## 2026-11-16: one sample episode per TV season, and a season hint (0.3.21, not pushed yet)
 
 Request from the Shield thread (docs/CROSS-THREAD.md, decided with the user): about 2,360 seasons, lowest-numbered regular episode each, queued after recently added and before the backlog; unanalysed episodes get the season's ratio in the 404 of `/api/v1/timeline`.

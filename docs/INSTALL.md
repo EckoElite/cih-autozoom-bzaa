@@ -111,6 +111,16 @@ analysed in the background) is not sampled again. An episode that has no timelin
 `GET /api/v1/timeline`, a `season_hint` with the ratios of that season's lowest-numbered analysed episode (see
 `docs/CROSS-THREAD.md`). The status page's Plex line and `/api/v1/status` (`seasons`) show how many seasons have a sample.
 
+**Episodes from a list another script keeps (0.3.21).** To have chosen episodes analysed ahead of the rest (for example the
+files a cache-mover script keeps on the SSD cache because they are being watched), mount the folder that holds the
+script's text file read-only (template: *Priority list folder*, for example host folder to `/priority`) and set
+`PRIORITY_LIST_FILE` to the file inside the container and `PRIORITY_LIST_TIME` to when it is read. Each line is a
+path in the script's own naming (`/mnt/cache_media/media/TV Shows/Show/Season 1/Show.S01E01.Title.mkv`); the analyzer
+matches it to the file it has by the `PATH_MAP` rules, else by the last folder and file names (so no rule is needed).
+Titles with no timeline are queued Medium; one already queued lower is moved up; analysed, skipped and failed ones are
+left alone, and a path it cannot match is counted and shown on the status page. The file is opened read only, in one
+read; the analyzer never writes to it or the folder.
+
 **Titles that change ratio often: the dense pass.** The first pass reads about one keyframe a second, which is
 right for a film that changes ratio a few times and wrong for one that flips every second or two (a multiverse montage,
 a flashback). The dense pass reads every reference frame (about every third frame), measures the picture in each, and
@@ -178,6 +188,8 @@ All settings are environment variables; change them by editing the container and
 | `DENSE_TRIGGER` | `20` | how many ratio changes the first pass must find before a title also gets the dense pass (see below); `0` turns the automatic trigger off, and titles on the known-variable list always get it |
 | `DENSE_MIN_FRAMES` | `4` | the shortest change the dense pass follows, in frames (4 is about 0.17 s; at least 2) |
 | `KNOWN_VARIABLE_FILE` | | optional text file (for example `/config/known_variable.txt`), one `Title (Year)` per line, of extra films that change ratio; they skip the survey and get the full pass, like the titles bundled with the analyzer, and are queued ahead of recently added titles and the backlog (behind only titles asked for by hand or by a player) |
+| `PRIORITY_LIST_FILE` | | optional text file in the container, one media path per line (for example `/priority/plexcache_mover_files_to_exclude.txt`), kept by another script. Its episodes are matched to the files the analyzer has by `PATH_MAP` or by folder and file name, and queued in the Medium tier (with the known-variable films, ahead of recently added titles, season samples and the backlog). Opened read only, in one short read |
+| `PRIORITY_LIST_TIME` | `04:00` | the time of day (local, `TZ`) the list is read, `HH:MM`; several separated by commas. It is also read at container start and by the **Read priority list now** button |
 | `SAMPLE_INTERVAL` | `1` | seconds between sampled keyframes in the full pass (at least 1) |
 | `SAMPLE_INTERVALS` | | per-folder overrides, `prefix=seconds;prefix=seconds` |
 | `SCAN_INTERVAL` | `3600` | seconds between scans of the media folders |

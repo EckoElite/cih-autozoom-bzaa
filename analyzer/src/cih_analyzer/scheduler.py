@@ -33,6 +33,7 @@ from .dense import trigger_changes
 from .known import is_known_variable
 from .pathmap import PathMap
 from .plex import PlexClient, PlexError, redact
+from .prioritylist import apply_priority_list, seconds_until_next
 from .scanner import PlexSummary, ScanSummary, scan_media, sync_plex
 from .store import PRIORITY_HIGH, PRIORITY_MEDIUM, PRIORITY_PLAYER, Store
 
@@ -248,6 +249,8 @@ class Scheduler:
         self._transcode: tuple[float, bool] = (0.0, False)
         self.last_scan: dict | None = None
         self.last_plex: dict | None = None
+        self.last_priority_list: dict | None = None
+        self._priority_lock = threading.Lock()
         self._scan_lock = threading.Lock()
         self._workers: dict[int, threading.Thread] = {}
         self._workers_lock = threading.Lock()
@@ -613,6 +616,38 @@ class Scheduler:
         )
         return summary
 
+    def priority_list_now(self) -> dict | None:
+        """Read the priority list file (PRIORITY_LIST_FILE) and queue the episodes it names (Medium). The file is
+        only read. The result is kept in `last_priority_list` for the status page."""
+        file = self.settings.priority_list_file
+        if not file:
+            return None
+        with self._priority_lock:
+            summary = apply_priority_list(file, self.store, self.pathmap, self.clock())
+        self.last_priority_list = {"at": self.clock(), **summary.__dict__}
+        if summary.error:
+            log.warning("priority list: %s", summary.error)
+        else:
+            log.info(
+                "priority list: %d listed, %d matched, %d queued, %d moved up, %d already analysed, %d not found",
+                summary.lines,
+                summary.matched,
+                summary.queued,
+                summary.raised,
+                summary.done,
+                summary.unmatched,
+            )
+        return self.last_priority_list
+
+    def _priority_list_loop(self) -> None:
+        """Read the list when the container starts, then at each of the configured times of day."""
+        while not self.stop_event.is_set():
+            try:
+                self.priority_list_now()
+            except Exception:  # noqa: BLE001
+                log.exception("priority list failed")
+            self.stop_event.wait(seconds_until_next(self.settings.priority_list_times, self.clock()) + 1.0)
+
     def _loop(self, interval: float, task: Callable[[], object], name: str) -> None:
         while not self.stop_event.is_set():
             try:
@@ -702,6 +737,11 @@ class Scheduler:
                 if self.plex
                 else []
             ),
+            *(
+                [threading.Thread(target=self._priority_list_loop, name="priority-list")]
+                if self.settings.priority_list_file
+                else []
+            ),
         ]
         for t in threads:
             t.daemon = True
@@ -736,4 +776,5 @@ class Scheduler:
             "running": running,
             "last_scan": self.last_scan,
             "last_plex": self.last_plex,
+            "last_priority_list": self.last_priority_list,
         }

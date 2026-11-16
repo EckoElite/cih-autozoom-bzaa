@@ -320,6 +320,12 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
                 "sample_interval_s": settings.sample_interval_s,
                 "survey_interval_s": settings.survey_interval_s,
                 "sample_intervals": [list(i) for i in settings.sample_intervals],
+                "priority_list": {
+                    "file": settings.priority_list_file,
+                    "times": [t.strftime("%H:%M") for t in settings.priority_list_times],
+                }
+                if settings.priority_list_file
+                else None,
             },
         }
 
@@ -431,6 +437,13 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
         if not settings.plex_enabled:
             raise HTTPException(409, "Plex is not configured")
         return background(scheduler.plex_now)
+
+    @app.post("/api/v1/priority-list/read", dependencies=secured)
+    def priority_list_read() -> dict[str, str]:
+        """Read the priority list file now (it is read every day at PRIORITY_LIST_TIME too)."""
+        if not settings.priority_list_file:
+            raise HTTPException(409, "no priority list is configured (PRIORITY_LIST_FILE)")
+        return background(scheduler.priority_list_now)
 
     @app.post("/api/v1/concurrency", dependencies=secured)
     def concurrency(body: WorkersBody) -> dict[str, Any]:

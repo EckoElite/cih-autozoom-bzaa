@@ -85,6 +85,34 @@ def _number(env: Mapping[str, str], name: str, default: float, minimum: float) -
     return value
 
 
+def parse_times(value: str | None) -> tuple[time, ...]:
+    """`04:00` or `04:00, 16:30`: times of day, sorted, without repeats."""
+    out: list[time] = []
+    for part in (value or "").replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            hours, minutes = part.split(":")
+            out.append(time(int(hours), int(minutes)))
+        except ValueError:
+            raise ValueError(
+                f"PRIORITY_LIST_TIME must look like 04:00 or 04:00,16:30, got {part!r}"
+            ) from None
+    return tuple(sorted(set(out)))
+
+
+def _priority_times(env: Mapping[str, str]) -> tuple[time, ...]:
+    """The times of day the priority list is read (PRIORITY_LIST_TIME, default 04:00)."""
+    raw = env.get("PRIORITY_LIST_TIME")
+    if raw is None or not raw.strip():
+        return (time(4, 0),)
+    try:
+        return parse_times(raw)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from None
+
+
 def _survey_interval(env: Mapping[str, str]) -> float:
     """Seconds between the places the survey looks at; 0 turns the survey off (every file gets the detailed pass)."""
     value = _number(env, "SURVEY_INTERVAL", 8.0, 0)
@@ -120,6 +148,10 @@ class Settings:
     on_demand_roots: tuple[str, ...] = ()
     express_workers: int = 3
     known_variable_file: str = ""
+    priority_list_file: str = (
+        ""  # a text file of media paths (one per line) whose episodes are queued, read only
+    )
+    priority_list_times: tuple[time, ...] = (time(4, 0),)  # the times of day it is read
 
     def interval_for(self, path: str) -> float:
         """Seconds between sampled keyframes for a file: the longest folder override that contains it, else the
@@ -187,4 +219,6 @@ class Settings:
             on_demand_roots=_split(env.get("ON_DEMAND_ROOTS")),
             express_workers=int(_number(env, "EXPRESS_WORKERS", 3, 0)),
             known_variable_file=(env.get("KNOWN_VARIABLE_FILE") or "").strip(),
+            priority_list_file=(env.get("PRIORITY_LIST_FILE") or "").strip(),
+            priority_list_times=_priority_times(env),
         )
