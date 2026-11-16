@@ -2,6 +2,10 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-16: actor page review (research only, nothing changed on the Shield)
+
+Wrote `docs/ACTOR_PAGE_REVIEW.md`: how Plex's own person pages work (data from `discover.provider.plex.tv`, keyed by the cast entry's `tagKey`), read-only checks against this account (profile, credits, related hubs, known-for all answer; credits match library items by `plex://<type>/<ratingKey>`), what PM4K does today (cast click opens a per-section filtered grid, no photo or bio), and three options (merged grid, Plex-like page, full copy). The official support article returned 403, so its details come from search excerpts, a forum thread and a reverse-engineered Plezy pull request.
+
 ## 2026-11-10: emoji above U+FFFF stripped from PM4K text
 
 New `players/pm4k-osd/patch_emoji.py` patches `lib/windows/kodigui.py` in the add-on (original kept as `kodigui.py.cih-orig`): a `cihNoAstral()` helper drops characters above U+FFFF, the joiners and variation selectors that go with them and the extra space left, and is applied to list item labels (`ManagedListItem` constructor, `setLabel`, `setLabel2`, `setProperty`) and to both window and dialog `setProperty`. `reapply.py` pulls, patches and pushes the file with the rest. Helper checked offline on sample strings (flame, flame mid-title, ZWJ family sequence, multi-line, non-strings, a heart with a variation selector); patched file compiles.
