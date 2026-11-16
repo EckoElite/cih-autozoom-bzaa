@@ -27,6 +27,7 @@ class Lookup:
     status: str
     timeline: dict | None = None
     asked: bool | None = None  # whether the analyzer accepted the request for analysis made with this lookup (None: none made)
+    hint: dict | None = None  # an episode without a timeline: what the analyzer found in its season's sample episode
 
     @property
     def override(self) -> dict | None:
@@ -75,12 +76,12 @@ class AnalyzerClient:
                 timeline = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
-                provisional = self._provisional_of(exc)
+                provisional, hint = self._answer_of(exc)
                 asked = self.request_analysis(ident, at) if request_analysis else None
                 if provisional is not None:
-                    return Lookup("provisional", provisional, asked)
+                    return Lookup("provisional", provisional, asked, hint)
                 cached = self._read_cache(ident)  # an older timeline beats none while the new one is made
-                return Lookup("cached", cached, asked) if cached else Lookup("missing", None, asked)
+                return Lookup("cached", cached, asked, hint) if cached else Lookup("missing", None, asked, hint)
             return self._offline(ident)
         except (urllib.error.URLError, OSError, ValueError):
             return self._offline(ident)
@@ -92,13 +93,15 @@ class AnalyzerClient:
         return Lookup("cached", cached) if cached else Lookup("unreachable")
 
     @staticmethod
-    def _provisional_of(error: urllib.error.HTTPError) -> dict | None:
-        """The `provisional` timeline in a 404 answer, if the analyzer sent one."""
+    def _answer_of(error: urllib.error.HTTPError) -> tuple[dict | None, dict | None]:
+        """The `provisional` timeline and the `season_hint` in a 404 answer, if the analyzer sent them."""
         try:
-            found = json.loads(error.read().decode("utf-8")).get("provisional")
+            body = json.loads(error.read().decode("utf-8"))
+            found, hint = body.get("provisional"), body.get("season_hint")
         except (OSError, ValueError, AttributeError):
-            return None
-        return found if isinstance(found, dict) and found.get("segments") else None
+            return None, None
+        provisional = found if isinstance(found, dict) and found.get("segments") else None
+        return provisional, hint if isinstance(hint, dict) else None
 
     def request_analysis(self, ident: dict, at: float | None = None) -> bool:
         """Queue the title at priority, from `at` seconds if the player is there. False if the request failed."""

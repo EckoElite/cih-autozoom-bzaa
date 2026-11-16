@@ -221,6 +221,29 @@ class GlueTests(unittest.TestCase):
         self.assertEqual(self.zooms()[:2], [0.7565, 1.0])              # the timeline arrived: scope at this position
         self.assertTrue(all(request is False for _, request in self.client.calls[1:]))   # polling asks, never queues
 
+    def test_an_episode_without_a_timeline_uses_its_seasons_ratio_until_its_own_arrives(self):
+        hint = {"preset": 2.39, "aspect": 2.388, "variable": False, "ratios": [{"preset": 2.39, "share": 1.0}]}
+        self.client = FakeClient(client_mod.Lookup("missing", None, True, hint), client_mod.Lookup("missing", None, None, hint),
+                                 client_mod.Lookup("ok", analyzer_timeline(cut_frames=(240, 360))))  # fmt: skip
+        XBMC.Player.t0 = time.perf_counter()
+        player = self.new_player()
+        player.onAVStarted()
+        self.assertEqual(self.zooms(), [1.0])                          # 2.39 in a 3840x2160 frame: scope, not the 16:9 fit
+        deadline = time.time() + 3
+        while len(self.zooms()) < 2 and time.time() < deadline:
+            time.sleep(0.05)
+        player.onPlayBackStopped()
+        self.assertEqual(self.zooms()[:2], [1.0, 1.0])                 # then the episode's own timeline (scope here too)
+
+    def test_a_season_whose_sample_changed_ratio_gets_the_plain_fit(self):
+        hint = {"preset": 2.39, "variable": True}
+        self.client = FakeClient(client_mod.Lookup("missing", None, True, hint))
+        XBMC.Player.t0 = time.perf_counter()
+        player = self.new_player()
+        player.onAVStarted()
+        player.onPlayBackStopped()
+        self.assertEqual(self.zooms()[0], 0.7565)
+
     def test_a_provisional_timeline_is_used_at_once_and_the_final_one_replaces_it(self):
         def segment(start, end, h, frame):
             return {"start": start, "end": end, "active": {"x": 0, "y": (2160 - h) // 2, "w": 3840, "h": h},

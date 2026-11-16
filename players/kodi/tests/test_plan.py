@@ -21,6 +21,19 @@ def timeline(segments, ramps=(), fps=23.976, video=(3840, 2160, "1:1")):
             "segments": list(segments), "ramps": list(ramps)}
 
 
+class SeasonZoomTests(unittest.TestCase):
+    """an episode the analyzer has not measured: its season's sample ratio, or nothing when that is unsafe"""
+
+    def test_one_ratio_gives_that_ratios_zoom(self):
+        self.assertEqual(round(plan.season_zoom(UHD, GEO, {"preset": 1.85}), 4), 0.7872)
+        self.assertEqual(round(plan.season_zoom(UHD, GEO, {"preset": 1.78}), 4), 0.7565)
+        self.assertEqual(round(plan.season_zoom(UHD, GEO, {"preset": None, "aspect": 2.39}), 4), 1.0)
+
+    def test_no_hint_a_changing_sample_or_nonsense_gives_none(self):
+        for hint in (None, {}, {"preset": 2.39, "variable": True}, {"preset": "x"}, {"preset": 0.5}, {"preset": 9}, "2.39"):
+            self.assertIsNone(plan.season_zoom(UHD, GEO, hint), hint)
+
+
 class ZoomMathTests(unittest.TestCase):
     """The nominal table of spec 5.3 (a 16:9 container, centred band), re-derived from the band rows."""
 

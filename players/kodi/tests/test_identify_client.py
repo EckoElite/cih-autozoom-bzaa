@@ -82,8 +82,8 @@ class Server:
         return FakeResponse(json.dumps(answer).encode("utf-8"))
 
 
-def http_error(code):
-    return urllib.error.HTTPError("http://x", code, "err", {}, io.BytesIO(b"{}"))
+def http_error(code, body=None):
+    return urllib.error.HTTPError("http://x", code, "err", {}, io.BytesIO(json.dumps(body or {}).encode("utf-8")))
 
 
 TIMELINE = {"video": {"fps": 24}, "segments": [], "override": {"mode": "disable", "preset": None}}
@@ -130,6 +130,15 @@ class ClientTests(unittest.TestCase):
         api = self.make(Server(http_error(503)))
         self.assertFalse(api.request_analysis(PART, 5.0))
         self.assertEqual(api.last_error, "HTTP 503")
+
+    def test_a_404_for_an_episode_carries_its_seasons_hint(self):
+        hint = {"preset": 1.78, "aspect": 1.777, "variable": False}
+        found = self.make(Server(http_error(404, {"detail": "no timeline", "season_hint": hint}), {"status": "queued"})).timeline(PART)
+        self.assertEqual((found.status, found.timeline, found.hint), ("missing", None, hint))
+
+    def test_a_hint_that_is_not_an_object_is_ignored(self):
+        found = self.make(Server(http_error(404, {"season_hint": "2.39"}), {"status": "queued"})).timeline(PART)
+        self.assertEqual((found.status, found.hint), ("missing", None))
 
     def test_polling_does_not_queue_again(self):
         server = Server(http_error(404))

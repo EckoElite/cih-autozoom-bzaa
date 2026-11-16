@@ -242,9 +242,13 @@ class ZoomPlayer(xbmc.Player):
             time.sleep(0.1)
             video = playing_video_size()
         video = video or plan_mod.Video(1920, 1080)  # unreadable: assume 16:9, whose zoom never overhangs the screen
-        zoom = plan_mod.full_frame_zoom(video, geometry())
+        hint = self.lookup.hint if self.lookup else None
+        zoom = plan_mod.season_zoom(video, geometry(), hint)  # an episode not analysed yet: its season's ratio, if known
+        if zoom is None:
+            zoom = plan_mod.full_frame_zoom(video, geometry())
         set_zoom(zoom)
-        self.emit({"kind": "fallback", "zoom": zoom, "analyzer": self.lookup.status if self.lookup else None})
+        self.emit({"kind": "fallback", "zoom": zoom, "analyzer": self.lookup.status if self.lookup else None,
+                   "season_hint": hint.get("preset") or hint.get("aspect") if isinstance(hint, dict) else None})  # fmt: skip
 
     def start_polling(self):
         if self.poller is not None or self.lookup is None or self.lookup.status in ("unknown",):

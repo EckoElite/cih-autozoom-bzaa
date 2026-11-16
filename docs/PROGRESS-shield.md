@@ -2,6 +2,16 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-18 (night): season sample episodes: decisions, request, and the Kodi add-on half
+
+Decided with the user: the analyzer processes the lowest-numbered regular episode of every season (about 2,360 seasons: 1,991 + 363 + 9), queued after recently added and before the backlog; its ratio stands in for episodes that have no timeline of their own, both in the PM4K tag (shown as "~1.78:1", the tilde meaning inherited) and in the Kodi zoom (instead of the plain "contain" fit); an episode's own timeline always wins once it exists. Written up as a request to the analyzer thread in `docs/CROSS-THREAD.md` (a `season_hint` object in the 404 answer of `GET /api/v1/timeline`, the sampling, a progress count) and sent to it. Nothing under `analyzer/` was touched by this thread.
+
+Built here, not yet deployed to the Shield (waits for the analyzer to deliver, and for the user's go-ahead for the add-on install): `client.py` reads `season_hint` from the 404 body into `Lookup.hint`; `plan.season_zoom()` turns it into one zoom (nothing when the sample itself changed ratio, when the value is nonsense, or when there is no hint; a ratio within 0.5 % of the frame's own display ratio uses the frame fit); `service.apply_fallback()` uses it, logs it in the events file, and the existing polling replaces it when the episode's own timeline arrives. Tests added (hint read, hint ignored when malformed, season zoom values, fallback with and without a variable sample); the 60 add-on tests pass.
+
+Known risk of the inherited ratio, accepted by the choice: an episode whose picture is wider than its season's sample (a 2.39 episode in a 1.78 season) shows with bars, which is safe; one that is taller than the sample (a 1.78 episode in a 2.39 season) overhangs the screen until its own analysis arrives, because the zoom is 1.0 for scope. The plain fit that would have been used otherwise never overhangs.
+
+Still to do on this thread once the analyzer ships it: the PM4K tag on the episode, season and show pages (with "~" for inherited values), and installing the add-on.
+
 ## 2026-11-18 (later): aspect-ratio tag on the movie page
 
 The Audio / Subtitles row of the movie page now ends with ASPECT and a value for every title the analyzer has finished: "2.39:1" for one ratio, "VAR 2.39 / 1.85" for a variable-ratio title (every ratio that fills 3 % or more of the running time, longest first; 1.33 and 1.34 count as one). Titles the analyzer has not finished, or cannot be reached, get no tag; the page never asks the analyzer to analyse anything (no `analyze=1`).

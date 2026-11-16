@@ -106,6 +106,23 @@ def full_frame_zoom(video: Video, geo: Geometry) -> float:
     return rect_zoom(video, geo, video.width, video.height)
 
 
+def season_zoom(video: Video, geo: Geometry, hint: dict | None) -> float | None:
+    """The zoom for an episode the analyzer has not measured, from its season's sample episode (`season_hint` in the
+    analyzer's answer): one ratio for the whole episode. None (use the plain fallback) when there is no usable hint, or
+    when the sample itself changed ratio: a guess that could be wrong half the time is not worth making."""
+    if not isinstance(hint, dict) or hint.get("variable"):
+        return None
+    try:
+        ratio = float(hint.get("preset") or hint.get("aspect"))
+    except (TypeError, ValueError):
+        return None
+    if not 1.0 <= ratio <= 3.0:
+        return None
+    if abs(ratio - video.dar) < 0.005 * video.dar:  # 1.78 for a 16:9 frame: the frame itself, not a rounding of it
+        return full_frame_zoom(video, geo)
+    return ratio_zoom(video, geo, ratio)
+
+
 def _r(z: float) -> float:
     return round(float(z), 6)
 
