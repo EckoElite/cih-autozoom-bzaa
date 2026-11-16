@@ -31,10 +31,11 @@ TIERS = (PRIORITY_HIGHEST, PRIORITY_HIGH, PRIORITY_MEDIUM, PRIORITY_LOW)
 TIER_NAMES = {1: "Highest", 2: "High", 3: "Medium", 4: "Low"}
 
 # The order of the queue: tier, then what was placed by hand (`rank`), then the tier's own rule: first come first served
-# for P1 and P2; for P3 and P4 recently added first, then the newest file first.
+# for P1 and P2; for P3 and P4 recently added first, then the episode that stands for its TV season (`season_sample`),
+# then the rest, each group with the newest file first.
 QUEUE_ORDER = (
     "priority ASC, (rank IS NULL) ASC, rank ASC, "
-    "CASE WHEN priority <= 2 THEN 0 ELSE 1 - recent END ASC, "
+    "CASE WHEN priority <= 2 THEN 0 WHEN recent = 1 THEN 0 WHEN season_sample = 1 THEN 1 ELSE 2 END ASC, "
     "CASE WHEN priority <= 2 THEN queued_at ELSE -mtime END ASC, path ASC"
 )
 
@@ -91,6 +92,15 @@ MIGRATIONS: tuple[str, ...] = (
         priority = CASE priority WHEN 0 THEN 2 WHEN 1 THEN 3 ELSE 4 END WHERE priority >= 0;
     DROP INDEX files_queue;
     CREATE INDEX files_queue ON files(status, priority, rank, queued_at)
+    """,
+    # TV seasons: Plex's season key and the season and episode numbers, so one episode can stand for its season (the
+    # `season_hint` of the timeline answer); `season_sample` marks the episode queued to do that, ahead of the backlog
+    """
+    ALTER TABLE files ADD COLUMN season_key INTEGER;
+    ALTER TABLE files ADD COLUMN season INTEGER;
+    ALTER TABLE files ADD COLUMN episode INTEGER;
+    ALTER TABLE files ADD COLUMN season_sample INTEGER NOT NULL DEFAULT 0;
+    CREATE INDEX files_season ON files(season_key)
     """,
 )
 
@@ -183,7 +193,8 @@ class Store:
         waiting = "idle" if on_demand else "queued"
         with self._lock:
             row = self._one(
-                "SELECT status, priority, rank, size, mtime, analyzer_version, timeline FROM files WHERE path = ?",
+                "SELECT status, priority, rank, size, mtime, analyzer_version, timeline, season_sample FROM files "
+                "WHERE path = ?",
                 (path,),
             )
             if row is None:
@@ -200,7 +211,7 @@ class Store:
                 self._run(
                     f"UPDATE files SET size=?, mtime=?, status='{waiting}', priority=?, queued_at=?, error=NULL, "  # noqa: S608
                     "attempts=0, timeline=NULL, ramp_raw=NULL, quick_hash=NULL, flags=NULL, segments=NULL, "
-                    "skip_reason=NULL, ran=NULL, recent=0 WHERE path=? AND status != 'running'",
+                    "skip_reason=NULL, ran=NULL, recent=0, season_sample=0 WHERE path=? AND status != 'running'",
                     (size, mtime, again, now, path),
                 )
                 if row["status"] != "queued":
@@ -211,7 +222,12 @@ class Store:
                 self._run("UPDATE files SET status=?, queued_at=? WHERE path=?", (status, now, path))
                 return "returned"
             if on_demand:
-                if row["status"] == "queued" and not row["timeline"] and row["priority"] >= PRIORITY_LOW:
+                if (
+                    row["status"] == "queued"
+                    and not row["timeline"]
+                    and row["priority"] >= PRIORITY_LOW
+                    and not row["season_sample"]  # queued on purpose, to stand for its season
+                ):
                     # queued in the background before this folder was marked on demand (the setting was added after
                     # the first scan): put it back to waiting for a player
                     self._run("UPDATE files SET status='idle' WHERE path=?", (path,))
@@ -237,7 +253,7 @@ class Store:
         self._run(
             "UPDATE files SET size=?, mtime=?, status='queued', priority=?, queued_at=?, error=NULL, attempts=0, "
             "timeline=NULL, ramp_raw=NULL, quick_hash=NULL, flags=NULL, segments=NULL, skip_reason=NULL, "
-            "started_at=NULL, options=NULL, ran=NULL, rank=NULL, recent=0 WHERE path=?",
+            "started_at=NULL, options=NULL, ran=NULL, rank=NULL, recent=0, season_sample=0 WHERE path=?",
             (size, mtime, priority, time.time() if now is None else now, path),
         )
 
@@ -305,7 +321,7 @@ class Store:
         self._run(
             "UPDATE files SET status='done', timeline=?, ramp_raw=?, quick_hash=?, analyzer_version=?, flags=?, "
             "segments=?, duration_s=?, analyzed_at=?, error=NULL, skip_reason=NULL, options=NULL, ran=?, rank=NULL, "
-            "recent=0 WHERE path=?",
+            "recent=0, season_sample=0 WHERE path=?",
             (
                 timeline_json,
                 ramp_raw_json,
@@ -321,11 +337,15 @@ class Store:
         )
 
     def fail(self, path: str, error: str) -> None:
-        self._run("UPDATE files SET status='error', error=?, rank=NULL WHERE path=?", (error[:2000], path))
+        self._run(
+            "UPDATE files SET status='error', error=?, rank=NULL, season_sample=0 WHERE path=?",
+            (error[:2000], path),
+        )
 
     def skip(self, path: str, reason: str) -> None:
         self._run(
-            "UPDATE files SET status='skipped', skip_reason=?, error=NULL, options=NULL, rank=NULL WHERE path=?",
+            "UPDATE files SET status='skipped', skip_reason=?, error=NULL, options=NULL, rank=NULL, season_sample=0 "
+            "WHERE path=?",
             (reason, path),
         )
 
@@ -386,7 +406,8 @@ class Store:
             self._run(
                 "UPDATE files SET status='idle', timeline=NULL, ramp_raw=NULL, quick_hash=NULL, flags=NULL, "
                 "segments=NULL, analyzer_version=NULL, analyzed_at=NULL, duration_s=NULL, started_at=NULL, "
-                "error=NULL, attempts=0, skip_reason=NULL, options=NULL, ran=NULL, rank=NULL, recent=0 WHERE path=?",
+                "error=NULL, attempts=0, skip_reason=NULL, options=NULL, ran=NULL, rank=NULL, recent=0, season_sample=0 "
+                "WHERE path=?",
                 (path,),
             )
             return "idle"
@@ -413,13 +434,92 @@ class Store:
         rating_key: int | None,
         title: str | None,
         added_at: float | None,
+        season_key: int | None = None,
+        season: int | None = None,
+        episode: int | None = None,
     ) -> bool:
         return (
             self._run(
-                "UPDATE files SET part_id=?, rating_key=?, title=?, added_at=? WHERE path=?",
-                (part_id, rating_key, title, added_at, path),
+                "UPDATE files SET part_id=?, rating_key=?, title=?, added_at=?, season_key=?, season=?, episode=? "
+                "WHERE path=?",
+                (part_id, rating_key, title, added_at, season_key, season, episode, path),
             )
             > 0
+        )
+
+    # ---- one episode per TV season ---------------------------------------------------------------------------------
+
+    def plan_season_samples(self, now: float | None = None) -> dict[str, int]:
+        """Queue the lowest-numbered regular episode of every season that has no finished episode and none queued to
+        stand for it. Season 0 (specials) and episode 0 are not regular. An episode that is skipped, missing or in
+        error is passed over for the next one; one that is waiting in the plain backlog is only marked and moved up.
+        Safe to repeat: a season that is covered is left alone. Returns `{"seasons": n, "queued": n}`."""
+        now = time.time() if now is None else now
+        with self._lock:
+            rows = self._all(
+                "SELECT path, season_key, status, season_sample, (timeline IS NOT NULL) AS finished FROM files "
+                "WHERE season_key IS NOT NULL AND season >= 1 AND episode >= 1 ORDER BY season_key, episode, path"
+            )
+            queued = 0
+            covered: set[int] = set()
+            pick: dict[int, dict[str, Any]] = {}
+            keys: set[int] = set()
+            for row in rows:
+                key = row["season_key"]
+                keys.add(key)
+                if key in covered:
+                    continue
+                if (
+                    row["status"] == "running"
+                    or (row["status"] == "done" and row["finished"])
+                    or (row["status"] == "queued" and row["season_sample"])
+                ):
+                    covered.add(key)
+                    pick.pop(key, None)
+                elif key not in pick and row["status"] in ("idle", "queued"):
+                    pick[key] = row
+            for row in pick.values():
+                if row["status"] == "idle":
+                    queued += self._run(
+                        "UPDATE files SET status='queued', priority=?, queued_at=?, error=NULL, attempts=0, "
+                        "options=NULL, rank=NULL, season_sample=1 WHERE path=? AND status='idle'",
+                        (PRIORITY_LOW, now, row["path"]),
+                    )
+                else:
+                    queued += self._run(
+                        "UPDATE files SET season_sample=1 WHERE path=? AND status='queued'", (row["path"],)
+                    )
+            return {"seasons": len(keys), "queued": queued}
+
+    def season_progress(self) -> dict[str, int]:
+        """How the one-episode-per-season sampling stands: seasons known from Plex, those with a finished episode, those
+        with a sample queued or running, and those with nothing left to try (every episode skipped, missing or in
+        error). `not_queued` are seasons the next Plex sync will queue."""
+        rows = self._all(
+            "SELECT MAX(status = 'done' AND timeline IS NOT NULL) AS done, "
+            "MAX(status = 'running') AS running, MAX(status = 'queued' AND season_sample = 1) AS waiting, "
+            "MAX(status IN ('idle', 'queued')) AS open FROM files "
+            "WHERE season_key IS NOT NULL AND season >= 1 AND episode >= 1 GROUP BY season_key"
+        )
+        done = sum(1 for r in rows if r["done"])
+        pending = sum(1 for r in rows if not r["done"] and (r["running"] or r["waiting"]))
+        stuck = sum(
+            1 for r in rows if not r["done"] and not r["running"] and not r["waiting"] and not r["open"]
+        )
+        return {
+            "seasons": len(rows),
+            "sampled": done,
+            "pending": pending,
+            "unreachable": stuck,
+            "not_queued": len(rows) - done - pending - stuck,
+        }
+
+    def season_sample_for(self, season_key: int, exclude_path: str | None = None) -> dict[str, Any] | None:
+        """The finished episode that stands for a season: the lowest-numbered one with a timeline."""
+        return self._one(
+            "SELECT path, rating_key, season, episode, timeline FROM files WHERE season_key=? AND season >= 1 "
+            "AND status='done' AND timeline IS NOT NULL AND path != ? ORDER BY episode ASC, path ASC LIMIT 1",
+            (season_key, exclude_path or ""),
         )
 
     def all_paths(self) -> list[str]:

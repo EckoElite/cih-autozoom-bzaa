@@ -61,6 +61,18 @@ class PlexPart:
     rating_key: int
     title: str
     added_at: float | None
+    season_key: int | None = (
+        None  # an episode's season (Plex's parentRatingKey), its number and the episode's own
+    )
+    season: int | None = None
+    episode: int | None = None
+
+
+def _whole(value: object) -> int | None:
+    try:
+        return int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return None
 
 
 class PlexClient:
@@ -109,6 +121,10 @@ class PlexClient:
         except (KeyError, TypeError, ValueError):
             return
         added = item.get("addedAt")
+        season_key = season = episode = None
+        if item.get("type") == "episode":
+            season_key = _whole(item.get("parentRatingKey"))
+            season, episode = _whole(item.get("parentIndex")), _whole(item.get("index"))
         for media in item.get("Media", []) or []:
             for part in media.get("Part", []) or []:
                 if "file" not in part or "id" not in part:
@@ -120,6 +136,9 @@ class PlexClient:
                     rating_key=rating_key,
                     title=title,
                     added_at=float(added) if added is not None else None,
+                    season_key=season_key,
+                    season=season,
+                    episode=episode,
                 )
 
     def parts(self, section: Section) -> Iterator[PlexPart]:

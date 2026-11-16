@@ -30,6 +30,7 @@ from .config import Settings
 from .known import is_known_variable
 from .pathmap import PathMap, normalize
 from .scheduler import MAX_WORKERS, Scheduler
+from .season import season_hint
 from .store import PRIORITY_HIGH, PRIORITY_HIGHEST, PRIORITY_PLAYER, TIER_NAMES, TIERS, Store
 
 PAGE = Path(__file__).with_name("web") / "index.html"
@@ -228,6 +229,11 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
                 {"mode": override["mode"], "preset": override["preset"]} if override else None
             )
             answer["provisional"] = provisional
+        if row and row.get("season_key") and (row.get("season") or 0) >= 1:
+            sample = store.season_sample_for(row["season_key"], row["path"])
+            hint = season_hint(sample) if sample else None
+            if hint:  # an episode nobody has played: the picture of its season's analysed episode
+                answer["season_hint"] = hint
         return JSONResponse(answer, status_code=404, headers={"X-Cih-Status": status})
 
     @app.post("/api/v1/analyze", dependencies=secured)
@@ -296,6 +302,7 @@ def create_app(settings: Settings, store: Store, scheduler: Scheduler, pathmap: 
             "schema": store.schema_version,
             "uptime_s": round(time.time() - started),
             "counts": store.counts(),
+            "seasons": store.season_progress(),
             "scheduler": scheduler.status(),
             "plex": {"enabled": settings.plex_enabled, "skipped_sections": list(settings.plex_skip_sections)},
             "media_roots": list(settings.media_roots),

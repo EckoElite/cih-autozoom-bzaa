@@ -2,6 +2,20 @@
 
 Newest first. Shared history before 2026-11-09 is in PROGRESS.md.
 
+## 2026-11-16: one sample episode per TV season, and a season hint (0.3.21, not pushed yet)
+
+Request from the Shield thread (docs/CROSS-THREAD.md, decided with the user): about 2,360 seasons, lowest-numbered regular episode each, queued after recently added and before the backlog; unanalysed episodes get the season's ratio in the 404 of `/api/v1/timeline`.
+
+| Part | What was built |
+|---|---|
+| Plex client | episodes carry season key (`parentRatingKey`), season and episode number |
+| Store (migration 6) | columns `season_key`, `season`, `episode`, `season_sample` (+ index); queue order is now recent, then season samples, then the rest; a scan no longer sends a queued sample back to "on demand"; the flag is cleared when the title finishes, fails, is skipped, forgotten or restarted |
+| Planning | `plan_season_samples` runs at the end of every Plex sync: a season with no finished, running or queued-sample episode gets its lowest episode (>= 1, season >= 1, status idle or queued) queued Low; skipped, missing or failed episodes are passed over; repeating it queues nothing more |
+| Answer | `season_hint` (new `season.py`): ratios by share of running time, longest first, `variable` when two ratios have 3 % or more, `from` = lowest-numbered finished episode of the season |
+| Progress | `/api/v1/status` `seasons` (seasons, sampled, pending, unreachable, not_queued) and a line on the status page |
+
+Verified: 19 new tests (queue choice, hand-over on error and skip, backlog episode moved up, queue order, rescan, progress counts, ratio shares, hint in the 404 by `rating_key` and `part_id`, none for specials or when the episode has its own timeline, a fake Plex sync end to end); full suite 454 passed, 1 skipped; ruff clean. Not verified: a real Plex sync (season numbers from the user's Plex), the real count of seasons (the Shield thread's 2,360 is from its own count), and throughput of the sampling on the NAS.
+
 ## 2026-11-10: EEAAO finished in the container on 0.3.19 (checked against the container's own output)
 
 Analysed once (attempts 1), dense pass, 6,488 s, 247 segments, 12 ramps, all readable ranges stored. 0.3.20 pushed and CI green (image built); the container still ran 0.3.19.

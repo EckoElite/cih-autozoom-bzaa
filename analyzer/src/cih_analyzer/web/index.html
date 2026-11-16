@@ -205,6 +205,15 @@ async function json(path, opts) {
   if (!r.ok && r.status !== 404) throw new Error(path + " answered " + r.status);
   return r.status === 404 ? null : r.json();
 }
+// one analysed episode stands for each TV season (the season_hint players get for episodes without a timeline)
+const seasonLine = (t) => {
+  if (!t || !t.seasons) return "";
+  const rest = [];
+  if (t.pending) rest.push(t.pending + " queued or running");
+  if (t.not_queued) rest.push(t.not_queued + " not queued yet");
+  if (t.unreachable) rest.push(t.unreachable + " with no episode left to try");
+  return " TV seasons with a sample episode: " + t.sampled + " of " + t.seasons + (rest.length ? " (" + rest.join(", ") + ")" : "") + ".";
+};
 const when = (t) => t ? new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
 const TIER = { 1: "Highest", 2: "High", 3: "Medium", 4: "Low" };
 const tierName = (t) => "P" + t + " " + TIER[t];
@@ -401,7 +410,7 @@ async function refresh() {
     $("sched").textContent = (sc.paused ? "" : "Running. ") + sc.busy + " of " + sc.workers + " worker(s) busy" +
       (sc.busy > sc.workers ? " (" + (sc.busy - sc.workers) + " finishing, then stopping)" : "") + ". " +
       (sc.last_scan ? "Last scan " + when(sc.last_scan.at) + " (" + sc.last_scan.seen + " files). " : "") +
-      (s.plex.enabled ? (sc.last_plex ? (sc.last_plex.error ? "Plex: " + sc.last_plex.error : "Plex synced " + when(sc.last_plex.at) + " (" + sc.last_plex.matched + " matched).") : "Plex not synced yet.") : "Plex not configured.");
+      (s.plex.enabled ? (sc.last_plex ? (sc.last_plex.error ? "Plex: " + sc.last_plex.error : "Plex synced " + when(sc.last_plex.at) + " (" + sc.last_plex.matched + " matched).") : "Plex not synced yet.") : "Plex not configured.") + seasonLine(s.seasons);
 
     await loadUpNext();
 

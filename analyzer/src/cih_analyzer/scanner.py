@@ -143,6 +143,8 @@ class PlexSummary:
         0  # Plex lists the file but the scanner has not seen it (not mounted, or outside the roots)
     )
     boosted: int = 0
+    seasons: int = 0  # TV seasons Plex lists (specials left out)
+    season_samples_queued: int = 0  # episodes queued this sync to stand for their season
     skipped_sections: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -156,8 +158,9 @@ def sync_plex(
     recent_days: float = 14.0,
     now: float | None = None,
 ) -> PlexSummary:
-    """Attach Plex's part id, rating key and title to the files the scanner found, and move recently added
-    titles to the front of the queue. Raises `PlexError` if Plex cannot be read."""
+    """Attach Plex's part id, rating key, title and (for an episode) season and episode number to the files the
+    scanner found, move recently added titles to the front of the queue, and queue one episode for every TV season that
+    has none analysed (behind the recent ones, ahead of the backlog). Raises `PlexError` if Plex cannot be read."""
     now = time.time() if now is None else now
     summary = PlexSummary()
     skip = {s.casefold() for s in skip_sections}
@@ -179,6 +182,9 @@ def sync_plex(
                     rating_key=part.rating_key,
                     title=part.title,
                     added_at=part.added_at,
+                    season_key=part.season_key,
+                    season=part.season,
+                    episode=part.episode,
                 )
                 if not ok:
                     if names is None:
@@ -191,6 +197,9 @@ def sync_plex(
                             rating_key=part.rating_key,
                             title=part.title,
                             added_at=part.added_at,
+                            season_key=part.season_key,
+                            season=part.season,
+                            episode=part.episode,
                         )
                         summary.matched_by_name += int(ok)
                 if ok:
@@ -202,4 +211,6 @@ def sync_plex(
         except PlexError as exc:
             summary.errors.append(f"{section.title}: {exc}")  # one library failing must not hide the others
     summary.boosted = store.boost_recent(now - recent_days * 86400)
+    planned = store.plan_season_samples(now)
+    summary.seasons, summary.season_samples_queued = planned["seasons"], planned["queued"]
     return summary

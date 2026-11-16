@@ -103,6 +103,14 @@ ahead of you; a film or episode that keeps one ratio gets its final timeline in 
 takes as long as the full pass, with the stretches the survey found steady already played at the right zoom meanwhile. Plex ids are matched to files by folder and file name when no `PATH_MAP` rule
 covers the Plex path. If files were already queued before `ON_DEMAND_ROOTS` was set (the first scan ran without it), the next scan puts the ones nobody asked for back to "on demand".
 
+**One sample episode per season (0.3.21).** With Plex connected, every Plex sync (every `PLEX_INTERVAL`) queues the
+lowest-numbered regular episode (season 1 and up, episode 1 and up) of each TV season that has no analysed episode, in
+the Low tier behind recently added titles and ahead of the rest of the backlog. If that episode is skipped, missing or
+fails, the next one takes its place on the following sync. A season that already has an episode analysed (played, or
+analysed in the background) is not sampled again. An episode that has no timeline of its own then gets, in the 404 of
+`GET /api/v1/timeline`, a `season_hint` with the ratios of that season's lowest-numbered analysed episode (see
+`docs/CROSS-THREAD.md`). The status page's Plex line and `/api/v1/status` (`seasons`) show how many seasons have a sample.
+
 **Titles that change ratio often: the dense pass.** The first pass reads about one keyframe a second, which is
 right for a film that changes ratio a few times and wrong for one that flips every second or two (a multiverse montage,
 a flashback). The dense pass reads every reference frame (about every third frame), measures the picture in each, and
