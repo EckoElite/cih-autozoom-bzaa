@@ -6,7 +6,8 @@ originals (restoring them first where a file is already patched, so the result n
 pushes the result back. It never touches anything outside script.plexmod and the skin's font files.
 
 Besides the screen, font and dropdown fixes it also installs the emoji-capable font (build_emoji_font.py), the emoji
-filter (patch_emoji.py) and the person page (person/, patch_person.py). Building the font needs `pip install fonttools`
+filter (patch_emoji.py), the person page (person/, patch_person.py), the aspect tag (ratio/), the trailer start-up fix
+(trailer/, patch_trailer.py) and the return to the title page after a failed playback (patch_videoplayer.py). Building the font needs `pip install fonttools`
 for the Python that runs this script.
 
 usage: python reapply.py [--no-push] [--workdir DIR]
@@ -120,6 +121,10 @@ def main(argv: list[str]) -> int:
     adb("pull", f"{PM4K}/lib/windows/mixins/watchlist.py.cih-orig", str(plex / "lib" / "windows" / "mixins" / "watchlist.py.cih-orig"), check=False)
     adb("pull", f"{PM4K}/lib/windows/kodigui.py", str(plex / "lib" / "windows" / "kodigui.py"))
     adb("pull", f"{PM4K}/lib/windows/kodigui.py.cih-orig", str(plex / "lib" / "windows" / "kodigui.py.cih-orig"), check=False)
+    adb("pull", f"{PM4K}/lib/player.py", str(plex / "lib" / "player.py"))  # patch_trailer.py
+    adb("pull", f"{PM4K}/lib/player.py.cih-orig", str(plex / "lib" / "player.py.cih-orig"), check=False)
+    adb("pull", f"{PM4K}/lib/windows/videoplayer.py", str(plex / "lib" / "windows" / "videoplayer.py"))  # patch_videoplayer.py
+    adb("pull", f"{PM4K}/lib/windows/videoplayer.py.cih-orig", str(plex / "lib" / "windows" / "videoplayer.py.cih-orig"), check=False)
 
     print(f"restored {restore_originals(skin)} patched screens from their originals")
     for stale in skin.glob("script-cih-*"):
@@ -134,6 +139,8 @@ def main(argv: list[str]) -> int:
     print(run("patch_emoji.py", str(plex)).strip().splitlines()[-1])
     print(run("patch_person.py", str(plex)).strip().splitlines()[-1])
     print(run("patch_ratio.py", str(plex)).strip().splitlines()[-1])
+    print(run("patch_trailer.py", str(plex)).strip().splitlines()[-1])
+    print(run("patch_videoplayer.py", str(plex)).strip().splitlines()[-1])
     print(run("patch_watchlist.py", str(plex)).strip().splitlines()[-1])
     for backup in skin.glob("script-cih-*.cih-orig"):
         backup.unlink()
@@ -150,6 +157,9 @@ def main(argv: list[str]) -> int:
     adb("push", str(plex / "lib" / "windows" / "kodigui.py"), f"{PM4K}/lib/windows/kodigui.py")
     adb("push", str(plex / "lib" / "windows" / "person.py"), f"{PM4K}/lib/windows/person.py")
     adb("push", str(plex / "lib" / "windows" / "cihratio.py"), f"{PM4K}/lib/windows/cihratio.py")
+    adb("push", str(plex / "lib" / "player.py"), f"{PM4K}/lib/player.py")
+    adb("push", str(plex / "lib" / "windows" / "videoplayer.py"), f"{PM4K}/lib/windows/videoplayer.py")
+    adb("push", str(plex / "lib" / "cihtrailer.py"), f"{PM4K}/lib/cihtrailer.py")
     adb("push", str(plex / "lib" / "windows" / "mixins" / "roles.py"), f"{PM4K}/lib/windows/mixins/roles.py")
     for name in ("preplay.py", "subitems.py", "episodes.py"):
         adb("push", str(plex / "lib" / "windows" / name), f"{PM4K}/lib/windows/{name}")

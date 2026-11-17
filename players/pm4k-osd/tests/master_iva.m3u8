@@ -1,0 +1,31 @@
+#EXTM3U
+#EXT-X-VERSION:3
+## Created with Unified Streaming Platform (version=1.11.14-26090)
+
+# variants
+#EXT-X-STREAM-INF:BANDWIDTH=154000,CODECS="mp4a.40.2,avc1.4D401F",RESOLUTION=320x180
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=80396-video=64000.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+#EXT-X-STREAM-INF:BANDWIDTH=328000,CODECS="mp4a.40.2,avc1.4D401F",RESOLUTION=320x180
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=128431-video=181000.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+#EXT-X-STREAM-INF:BANDWIDTH=703000,CODECS="mp4a.40.2,avc1.4D401F",RESOLUTION=320x180
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=256722-video=406000.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+#EXT-X-STREAM-INF:BANDWIDTH=985000,CODECS="mp4a.40.2,avc1.4D401F",RESOLUTION=480x270
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=256722-video=672000.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+#EXT-X-STREAM-INF:BANDWIDTH=1767000,CODECS="mp4a.40.2,avc1.4D401F",RESOLUTION=720x406
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=256722-video=1410000.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+#EXT-X-STREAM-INF:BANDWIDTH=2886000,CODECS="mp4a.40.2,avc1.4D4028",RESOLUTION=1280x720
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=256722-video=2465000.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+#EXT-X-STREAM-INF:BANDWIDTH=3760000,CODECS="mp4a.40.2,avc1.4D4028",RESOLUTION=1280x720
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=256722-video=3290000.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+#EXT-X-STREAM-INF:BANDWIDTH=4650000,CODECS="mp4a.40.2,avc1.4D4029",RESOLUTION=1920x1080
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=256722-video=4130000.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+#EXT-X-STREAM-INF:BANDWIDTH=5539000,CODECS="mp4a.40.2,avc1.4D4029",RESOLUTION=1920x1080
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=256722-video=4968000.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+
+# variants
+#EXT-X-STREAM-INF:BANDWIDTH=86000,CODECS="mp4a.40.2"
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=80396.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+#EXT-X-STREAM-INF:BANDWIDTH=137000,CODECS="mp4a.40.2"
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=128431.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
+#EXT-X-STREAM-INF:BANDWIDTH=273000,CODECS="mp4a.40.2"
+https://d2em1d4z1elu3k.cloudfront.net/iva-svideo/5539-625719/625719.secure.ism/625719.secure-audio=256722.m3u8?c=112548&sub&ser=639252229580000000&hls_minimum_fragment_length=10
